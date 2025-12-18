@@ -2,56 +2,167 @@
 
 (Englisch Below)
 
-Deutsch: Dieses Tool soll den Stromverbrauch von Nvidia Grafikkarten in Niedriglast-Szenarien bzw. Idle senken, vor allem für Grafikkarten ab Blackwell (bei älteren geht auch der Multi Display PowerSaver im nvidia Insepctor). Funktioniert (bei mir) mit MSI Afterburner Undervolting und Overclocking (Stand 18.12.2025 Version 4.6.6 Beta7)
+## Deutsch
 
-Hinweis: Ich leiste hier keinen Support. Bei Fehler oder Verbesserungsvorschlägen darf gerne einer gemacht werden. Ob ich den umsetze, ist damit nicht gesagt. Ich leiste aber auf jeden Fall keinen Support. Ich stelle es hier nur bereit, falls andere es auch brauchen können.
+Dieses Tool soll den Stromverbrauch von Nvidia Grafikkarten in Niedriglast-Szenarien bzw. Idle senken, vor allem für Grafikkarten ab Blackwell (bei älteren geht auch der Multi Display PowerSaver im Nvidia Inspector).
 
-Anwendung:
-1. Unter "Erlaubte Taktraten" sollten die erlaubten Taktraten abgefragt werden. Für jede VRAM-Taktrate wird dann die erlaubte GPU-Taktrate aufgelistet. Diese Kombinationen dürfen dann genutzt werden
-2. Mit den Taktraten aus Schritt 1 kann man dann verschiedene Taktprofile erstellen (1, 2, 3 bzw. grün, gelb, orange).
-3. Unten hat man 3 Listen. Man kann zu jeder Liste Anwendungen (aus laufenden Prozessen oder .exe Dateien) hinzufügen. Ist eine der Anwendungen am laufen, wird das Taktoprofil ausgewählt. Es hat immer das Profil Vorrang mit dem höchsten Takt. Die Liste mit dem roten Titel ist die Liste, um alle Taktbeschränkungen aufzuheben (Unlock)
+Funktioniert (bei mir) mit MSI Afterburner Undervolting und Overclocking  
+(Stand 18.12.2025 – Version 4.6.6 Beta 7).
 
-Die Option "Anhand GPU- und VID-Auslastung steuern":
-Diese Option erlaubt es, dass die Profile anhand der GPU bzw. VID-Auslastung (Video Engine für Video schauen) gesteuert werden. Die Hierarchie/Priorität ist hier: 1: Unlock-Liste, 2: GPU-Auslastung, 3: das 3. Limit, 4: VID-Auslastung, 5: das 2. Limit, 6: Das 1. Limit (Standart-limit)
+### Wichtiger Hinweis
 
-GPU-Auslastung definieren:
---> Sinkt die Last, fällt man niemals direkt in das Standart-Limit-Profil (grün), sondern immer in das nächste kleinere Profil ( Unlock -> 3. Limit -> 2. Limit -> 1. Limit).
---> Unter "aktivieren", definiert man, wann dieses Profil aktiviert wird. Unter "deaktivieren", definiert man, wann das Profil deaktiviert wird (und automatisch in das nächst kleinere Gewechselt wird).
---> Wählt man unter "aktivieren" bei allen Listen die gleiche Last bzw. bei "Unlock" die niedrigste, wird es immer zuerst in das Unlock-Profil gehen bei Auslastung und dann Schrittweise zu Profil 3, 2, 1 zurücktakten, wenn der Takt unter die Schwelle sinkt.
-1. Unter der Liste mit dem roten Titel definiert man, ab welcher GPU-Auslastung die Limits komplett aufgehoben werden (Unlock). Wenn eine Anwendung in der Liste mit dem roten Titel ist (unlock), ist die GPU-Auslastung egal. Die Limits werden dann trotzdem aufgehoben. Die VID-Auslastung ist hier sowieso immer egal. 
-2. Unter der 3. Liste (Orange) definiert man, bei welcher GPU-Last oder VID-Auslastung die GPU in dieses Profil wechselt. Entweder GPU- oder VID-Auslastung muss den Schwellenwert Überschreiten. Bei Deaktivieren müssen hier beide (GPU- und VID- Auslastung) unter den Schwellenwert sinken, damit in das nächst kleinere Profil gewechselt wird.
-3. Unter der 2. Liste (Gelb) ist es das gleiche Prinzip, wie in der 3. Liste (Orange). Das 3. Profil hat natürlich Vorrang vor dem 2. Profil. Sinkt GPU- UND VID-Auslastung unter den Schwellenwert, wechselt es in das nächst kleinere Profil (Also Standartprofil).
-4. Die Zeit (ms) ist die Zeit, wie lange der Grenzwert aktiv sein muss (eine Art Hysterese).
+**Ich leiste hier keinen Support.**  
+Bei Fehler oder Verbesserungsvorschlägen darf gerne einer gemacht werden. Ob ich den umsetze, ist damit nicht gesagt.  
+Ich leiste aber auf jeden Fall keinen Support. Ich stelle es hier nur bereit, falls andere es auch brauchen können.
 
-Andere Optionen:
-Sind selbsterklärend (Übersetzung nutzen). Alle aktivieren, ist empfohlen.
---> .exe Datei nicht verschieben, nachdem man den Autostart aktiviert hat.
+### Anwendung
 
-Tray-Symbol: Die Farben entsprechen den Farben der Profile und Blau heisst, dass gar kein Profil aktiv ist.
+#### 1. Erlaubte Taktraten abfragen
+Unter **"Erlaubte Taktraten"** sollten die erlaubten Taktraten abgefragt werden.  
+Für jede VRAM-Taktrate wird dann die erlaubte GPU-Taktrate aufgelistet. Diese Kombinationen dürfen dann genutzt werden.
 
-Englisch with Translator:
+#### 2. Taktprofile erstellen
+Mit den Taktraten aus Schritt 1 kann man verschiedene Taktprofile erstellen:
+- Profil 1 (grün – niedrigste Taktraten / Standard-Limit)
+- Profil 2 (gelb)
+- Profil 3 (orange – höchste eingeschränkte Taktraten)
 
-This tool is designed to reduce the power consumption of NVIDIA graphics cards in low-load scenarios or when idle, particularly for graphics cards from the Blackwell generation onwards (for older cards, the Multi-Display Power Saver in NVIDIA Inspector also works).
-It works (for me) with MSI Afterburner undervolting and overclocking (as of 18 December 2025, version 4.6.6 Beta 7).
-Note: I am not providing any support here. Feel free to submit bug reports or suggestions for improvements. Whether I implement them is not guaranteed. I definitely will not provide support. I am simply making it available in case others might find it useful.
-Usage:
+#### 3. Anwendungsbasierte Steuerung
+Unten hat man 3 Listen:
+- Man kann zu jeder Liste Anwendungen (aus laufenden Prozessen oder .exe-Dateien) hinzufügen.
+- Ist eine der Anwendungen am Laufen, wird das entsprechende Takprofil ausgewählt.
+- Es hat immer das Profil Vorrang mit dem **höchsten Takt**.
+- Die Liste mit dem **roten Titel** ist die **Unlock**-Liste – sie hebt alle Taktbeschränkungen auf.
 
-Under "Allowed Clock Rates", the permitted clock rates should be queried. For each VRAM clock rate, the allowed GPU clock rate will then be listed. These combinations may then be used.
-Using the clock rates from step 1, various clock profiles can be created (1, 2, 3 – i.e., green, yellow, orange).
-At the bottom, there are three lists. Applications (from running processes or .exe files) can be added to each list. If one of the applications is running, the corresponding clock profile will be selected. The profile with the highest clocks always takes priority. The list with the red title is the one used to remove all clock restrictions (Unlock).
+#### Option „Anhand GPU- und VID-Auslastung steuern“ (optional)
+Diese Option erlaubt es, dass die Profile anhand der GPU- bzw. VID-Auslastung (Video Engine für Videos schauen) gesteuert werden.
 
-The option "Control based on GPU and VID utilisation": This option allows the profiles to be controlled based on GPU or VID utilisation (Video Engine for watching videos). The hierarchy/priority here is: 1: Unlock list, 2: GPU utilisation, 3: the 3rd limit, 4: VID utilisation, 5: the 2nd limit, 6: the 1st limit (default limit).
-Defining GPU utilisation:
+**Priorität/Hierarchie:**
+1. Unlock-Liste (anwendungsbezogen)
+2. GPU-Auslastung
+3. Profil 3 (orange)
+4. VID-Auslastung
+5. Profil 2 (gelb)
+6. Profil 1 (grün – Standard)
 
-When the load decreases, it never drops directly to the default limit profile (green), but always to the next lower profile (Unlock → 3rd limit → 2nd limit → 1st limit).
-Under "Activate", you define when this profile is activated. Under "Deactivate", you define when the profile is deactivated (and it automatically switches to the next lower one).
-If you set the same load threshold for "Activate" across all lists, or the lowest for "Unlock", it will first switch to the Unlock profile under load, then step down to profile 3, 2, 1 as the clocks fall below the threshold.
+**So funktioniert das Heruntertakten:**  
+Sinkt die Last, fällt man **niemals direkt** in das Standard-Profil (grün), sondern immer stufenweise:  
+Unlock → Profil 3 → Profil 2 → Profil 1.
 
+**Schwellwerte konfigurieren:**
+- **Aktivieren**: Wann das Profil aktiviert wird (Schwelle überschritten).
+- **Deaktivieren**: Wann das Profil deaktiviert wird und automatisch ins nächstkleinere gewechselt wird.
 
-Under the list with the red title, you define from which GPU utilisation the limits are completely removed (Unlock). If an application is in the list with the red title (Unlock), GPU utilisation is irrelevant – the limits will still be removed. VID utilisation is always irrelevant here.
-Under the 3rd list (orange), you define at which GPU load or VID utilisation the GPU switches to this profile. Either GPU or VID utilisation must exceed the threshold. For deactivation, both (GPU and VID utilisation) must fall below the threshold before switching to the next lower profile.
-Under the 2nd list (yellow), the same principle applies as for the 3rd list (orange). The 3rd profile naturally takes priority over the 2nd. When GPU and VID utilisation both fall below the threshold, it switches to the next lower profile (i.e., the default profile).
-The time (ms) is the duration for which the threshold must be active (a form of hysteresis).
+**Tipp:** Wählt man bei allen Listen denselben Aktivierungswert (bzw. bei Unlock den niedrigsten), geht es bei Last zuerst ins Unlock-Profil und taktet dann stufenweise zurück (3 → 2 → 1), sobald die Auslastung unter die Schwelle sinkt.
 
-Other options: These are self-explanatory (use the translation). Enabling all is recommended. → Do not move the .exe file after enabling autostart.
-Tray icon: The colours correspond to the profile colours, and blue means no profile is active at all.
+#### Detaillierte Einstellungen pro Liste
+1. **Roter Titel (Unlock-Liste)**  
+   Definiert, ab welcher GPU-Auslastung die Limits komplett aufgehoben werden.  
+   Ist eine Anwendung in dieser Liste, ist die Auslastung egal – Limits werden trotzdem aufgehoben.  
+   VID-Auslastung ist hier immer irrelevant.
+
+2. **Orange Liste (Profil 3)**  
+   Aktiviert, wenn **entweder** GPU- **oder** VID-Auslastung die Schwelle überschreitet.  
+   Deaktiviert erst, wenn **beide** unter die Schwelle sinken.
+
+3. **Gelbe Liste (Profil 2)**  
+   Gleiches Prinzip wie bei orange. Profil 3 hat natürlich Vorrang vor Profil 2.
+
+4. **Zeit (ms) – Hysterese**  
+   Der Grenzwert muss so lange durchgehend erfüllt sein, bevor ein Profilwechsel erfolgt (verhindert Flackern).
+
+#### Andere Optionen
+Sind größtenteils selbsterklärend (Übersetzung im Tool nutzen).  
+Alle aktivieren ist empfohlen.
+
+**Wichtig:** Die `.exe`-Datei nach Aktivierung des Autostarts nicht verschieben oder umbenennen.
+
+#### Tray-Symbol
+Die Farbe entspricht dem aktiven Profil:  
+- Grün, Gelb, Orange, Rot → entsprechendes Profil aktiv  
+- **Blau** → gar kein Profil aktiv (volle Taktraten erlaubt)
+
+---
+
+## Englisch with Translator:
+
+This tool reduces the power consumption of NVIDIA graphics cards in low-load or idle scenarios, especially for cards from the Blackwell generation onwards.  
+(For older cards, the Multi-Display Power Saver in NVIDIA Inspector also works.)
+
+It is compatible (tested by me) with MSI Afterburner undervolting and overclocking  
+(as of 18 December 2025 – MSI Afterburner version 4.6.6 Beta 7).
+
+## Important Note
+
+**I do not provide any support for this tool.**  
+You are welcome to report bugs or suggest improvements, but there is no guarantee that I will implement them.  
+I am simply making this available in case others find it useful.
+
+## Usage Instructions
+
+### 1. Query Allowed Clock Rates
+Under the section **"Allowed Clock Rates"**, query the permitted clock combinations.  
+The tool will list the allowed GPU clock rate for each VRAM clock rate. Only these combinations may be used.
+
+### 2. Create Clock Profiles
+Using the clock rates from step 1, create up to three clock profiles:
+- Profile 1 (green – lowest clocks / default limit)
+- Profile 2 (yellow)
+- Profile 3 (orange – highest restricted clocks)
+
+### 3. Application-Based Control
+There are three lists at the bottom of the window:
+- Applications (selected from running processes or .exe files) can be added to each list.
+- If an application from a list is running, the corresponding clock profile is applied.
+- The profile with the **highest clocks** always takes priority.
+- The list with the **red title** is the **Unlock** list – it removes all clock restrictions.
+
+### Control Based on GPU and VID Utilisation (Optional)
+
+This option allows profiles to be switched automatically based on GPU utilisation and VID utilisation (Video Engine – e.g., for video playback).
+
+**Priority hierarchy:**
+1. Unlock list (red title)
+2. GPU utilisation thresholds
+3. Profile 3 (orange)
+4. VID utilisation thresholds
+5. Profile 2 (yellow)
+6. Profile 1 (green – default)
+
+#### How Downclocking Works
+When load decreases, the tool **never jumps directly** to the default profile (green). Instead, it steps down gradually:  
+Unlock → Profile 3 → Profile 2 → Profile 1.
+
+#### Threshold Configuration
+- **Activate**: Defines when the profile becomes active (threshold exceeded).
+- **Deactivate**: Defines when the profile is deactivated and the tool switches to the next lower profile.
+
+**Tip:** Set the same activation threshold for all profiles (or the lowest for Unlock) to achieve smooth stepping: full unlock under load, then gradual downclocking as utilisation drops.
+
+#### Detailed Settings per List
+
+1. **Red title (Unlock list)**  
+   Defines the GPU utilisation threshold above which all limits are removed.  
+   If an application is in this list, utilisation thresholds are ignored – limits are removed regardless.  
+   VID utilisation is always ignored here.
+
+2. **Orange list (Profile 3)**  
+   The profile activates when **either** GPU **or** VID utilisation exceeds the threshold.  
+   It deactivates only when **both** fall below the threshold.
+
+3. **Yellow list (Profile 2)**  
+   Same logic as the orange list. Profile 3 always takes priority over Profile 2.
+
+4. **Hysteresis time (ms)**  
+   The threshold must be continuously met for this duration before a profile switch occurs (prevents rapid flickering).
+
+### Other Options
+Most options are self-explanatory (use the built-in translation if needed).  
+It is recommended to enable all options.  
+
+**Important:** Do not move or rename the `.exe` file after enabling autostart.
+
+### Tray Icon
+The icon colour matches the active profile:  
+- Green, Yellow, Orange, Red → corresponding profile active  
+- **Blue** → no profile active (full clocks allowed)
