@@ -31,7 +31,7 @@ Mit den Taktraten aus Schritt 1 kann man verschiedene Taktprofile erstellen:
 Unten hat man 3 Listen:
 - Man kann zu jeder Liste Anwendungen (aus laufenden Prozessen oder .exe-Dateien) hinzufügen.
 - Ist eine der Anwendungen am Laufen, wird das entsprechende Takprofil ausgewählt.
-- Es hat immer das Profil Vorrang mit dem **höchsten Takt**.
+- Es hat immer das höchste Profil Vorrang  (Unlock -> 3. Limit -> 2. Limit -> 1. Limit - Standart)
 - Die Liste mit dem **roten Titel** ist die **Unlock**-Liste – sie hebt alle Taktbeschränkungen auf.
 
 #### Option „Anhand GPU- und VID-Auslastung steuern“ (optional)
@@ -114,7 +114,7 @@ Using the clock rates from step 1, create up to three clock profiles:
 There are three lists at the bottom of the window:
 - Applications (selected from running processes or .exe files) can be added to each list.
 - If an application from a list is running, the corresponding clock profile is applied.
-- The profile with the **highest clocks** always takes priority.
+- The highest profile always takes priority (so: Unlock -> 3. Limit -> 2. Limit -> 1. Limit (Standard))
 - The list with the **red title** is the **Unlock** list – it removes all clock restrictions.
 
 ### Control Based on GPU and VID Utilisation (Optional)
