@@ -38,7 +38,7 @@ Unten hat man 3 Listen:
 Diese Option erlaubt es, dass die Profile anhand der GPU- bzw. VID-Auslastung (Video Engine für Videos schauen) gesteuert werden.
 
 **Priorität/Hierarchie:**
-1. Unlock-Liste (anwendungsbezogen)
+1. Unlock-Liste (roter Titel)
 2. GPU-Auslastung
 3. Profil 3 (orange)
 4. VID-Auslastung
@@ -51,7 +51,7 @@ Unlock → Profil 3 → Profil 2 → Profil 1.
 
 **Schwellwerte konfigurieren:**
 - **Aktivieren**: Wann das Profil aktiviert wird (Schwelle überschritten).
-- **Deaktivieren**: Wann das Profil deaktiviert wird und automatisch ins nächstkleinere gewechselt wird.
+- **Deaktivieren**: Wann das Profil deaktiviert wird und automatisch ins nächstkleinere Profil gewechselt wird.
 
 **Tipp:** Wählt man bei allen Listen denselben Aktivierungswert (bzw. bei Unlock den niedrigsten), geht es bei Last zuerst ins Unlock-Profil und taktet dann stufenweise zurück (3 → 2 → 1), sobald die Auslastung unter die Schwelle sinkt.
 
