@@ -1,4 +1,7 @@
 # Nvidia-Clock-Limiter
+
+(Englisch Below)
+
 Deutsch: Dieses Tool soll den Stromverbrauch von Nvidia Grafikkarten in Niedriglast-Szenarien bzw. Idle senken, vor allem für Grafikkarten ab Blackwell (bei älteren geht auch der Multi Display PowerSaver im nvidia Insepctor). Funktioniert (bei mir) mit MSI Afterburner Undervolting und Overclocking (Stand 18.12.2025 Version 4.6.6 Beta7)
 
 Hinweis: Ich leiste hier keinen Support. Bei Fehler oder Verbesserungsvorschlägen darf gerne einer gemacht werden. Ob ich den umsetze, ist damit nicht gesagt. Ich leiste aber auf jeden Fall keinen Support. Ich stelle es hier nur bereit, falls andere es auch brauchen können.
@@ -25,3 +28,30 @@ Sind selbsterklärend (Übersetzung nutzen). Alle aktivieren, ist empfohlen.
 --> .exe Datei nicht verschieben, nachdem man den Autostart aktiviert hat.
 
 Tray-Symbol: Die Farben entsprechen den Farben der Profile und Blau heisst, dass gar kein Profil aktiv ist.
+
+Englisch with Translator:
+
+This tool is designed to reduce the power consumption of NVIDIA graphics cards in low-load scenarios or when idle, particularly for graphics cards from the Blackwell generation onwards (for older cards, the Multi-Display Power Saver in NVIDIA Inspector also works).
+It works (for me) with MSI Afterburner undervolting and overclocking (as of 18 December 2025, version 4.6.6 Beta 7).
+Note: I am not providing any support here. Feel free to submit bug reports or suggestions for improvements. Whether I implement them is not guaranteed. I definitely will not provide support. I am simply making it available in case others might find it useful.
+Usage:
+
+Under "Allowed Clock Rates", the permitted clock rates should be queried. For each VRAM clock rate, the allowed GPU clock rate will then be listed. These combinations may then be used.
+Using the clock rates from step 1, various clock profiles can be created (1, 2, 3 – i.e., green, yellow, orange).
+At the bottom, there are three lists. Applications (from running processes or .exe files) can be added to each list. If one of the applications is running, the corresponding clock profile will be selected. The profile with the highest clocks always takes priority. The list with the red title is the one used to remove all clock restrictions (Unlock).
+
+The option "Control based on GPU and VID utilisation": This option allows the profiles to be controlled based on GPU or VID utilisation (Video Engine for watching videos). The hierarchy/priority here is: 1: Unlock list, 2: GPU utilisation, 3: the 3rd limit, 4: VID utilisation, 5: the 2nd limit, 6: the 1st limit (default limit).
+Defining GPU utilisation:
+
+When the load decreases, it never drops directly to the default limit profile (green), but always to the next lower profile (Unlock → 3rd limit → 2nd limit → 1st limit).
+Under "Activate", you define when this profile is activated. Under "Deactivate", you define when the profile is deactivated (and it automatically switches to the next lower one).
+If you set the same load threshold for "Activate" across all lists, or the lowest for "Unlock", it will first switch to the Unlock profile under load, then step down to profile 3, 2, 1 as the clocks fall below the threshold.
+
+
+Under the list with the red title, you define from which GPU utilisation the limits are completely removed (Unlock). If an application is in the list with the red title (Unlock), GPU utilisation is irrelevant – the limits will still be removed. VID utilisation is always irrelevant here.
+Under the 3rd list (orange), you define at which GPU load or VID utilisation the GPU switches to this profile. Either GPU or VID utilisation must exceed the threshold. For deactivation, both (GPU and VID utilisation) must fall below the threshold before switching to the next lower profile.
+Under the 2nd list (yellow), the same principle applies as for the 3rd list (orange). The 3rd profile naturally takes priority over the 2nd. When GPU and VID utilisation both fall below the threshold, it switches to the next lower profile (i.e., the default profile).
+The time (ms) is the duration for which the threshold must be active (a form of hysteresis).
+
+Other options: These are self-explanatory (use the translation). Enabling all is recommended. → Do not move the .exe file after enabling autostart.
+Tray icon: The colours correspond to the profile colours, and blue means no profile is active at all.
