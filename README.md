@@ -72,8 +72,8 @@ Unlock → Profil 3 → Profil 2 → Profil 1.
    Der Grenzwert muss so lange durchgehend erfüllt sein, bevor ein Profilwechsel erfolgt (verhindert Flackern).
 
 #### Andere Optionen
-Sind größtenteils selbsterklärend (Übersetzung im Tool nutzen).  
-Alle aktivieren ist empfohlen.
+Sind größtenteils selbsterklärend (Übersetzung im Tool nutzen). --> "Warnung bei Teufelskreilsauf (Diagnose)" ist ein Feature, das prüft, ob ständig zwischen Profilen hin- und her gewechelst wird. Das kann passieren, wenn man die "aktivieren" und "deaktivieren"-Grenzwerte so gesetzt hat, dass ständig hin und her gesprungen wird. Aktiviert man das Feature, wird einem eine Meldung ausgegeben. Die nächste Meldung kommt (frühestens) nach 60s wieder, wenn man auf "ok" gedrückt hat im Pop-Up.  
+--> Ich empfehle bis auf die Teufeskreislauf-Option alle zu aktivieren und beim testen von Grenzwerten auch dei Teufelskreislaufoption zu aktivieren (oder eben manuell nachzuschauen). 
 
 **Wichtig:** Die `.exe`-Datei nach Aktivierung des Autostarts nicht verschieben oder umbenennen.
 
@@ -157,8 +157,8 @@ Unlock → Profile 3 → Profile 2 → Profile 1.
    The threshold must be continuously met for this duration before a profile switch occurs (prevents rapid flickering).
 
 ### Other Options
-Most options are self-explanatory (use the built-in translation if needed).  
-It is recommended to enable all options.  
+Mostly self-explanatory (use the translation tool). --> “Warn on rapid cycling (diagnosis)” is a feature that checks whether you are constantly switching back and forth between profiles. This can happen if you have set the "activate" and "deactivate" thresholds in such a way that you are constantly jumping back and forth. If you activate the feature, a message will be displayed. The next message will appear (at the earliest) after 60 seconds if you have clicked "OK" in the pop-up.  
+--> I recommend activating all options except for the "warn on rapid cycling" option. On the other hand I recommend activating the "Warn on rapid cycling" option when testing thresholds (or checking manually). 
 
 **Important:** Do not move or rename the `.exe` file after enabling autostart.
 
