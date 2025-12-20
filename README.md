@@ -26,6 +26,7 @@ Mit den Taktraten aus Schritt 1 kann man verschiedene Taktprofile erstellen:
 - Profil 1 (grün – niedrigste Taktraten / Standard-Limit)
 - Profil 2 (gelb)
 - Profil 3 (orange – höchste eingeschränkte Taktraten)
+- Unlock-Profil (Rot = keine Takteinschränkung)
 
 #### 3. Anwendungsbasierte Steuerung
 Unten hat man 3 Listen:
@@ -109,6 +110,7 @@ Using the clock rates from step 1, create up to three clock profiles:
 - Profile 1 (green – lowest clocks / default limit)
 - Profile 2 (yellow)
 - Profile 3 (orange – highest restricted clocks)
+- Unlock-profile (red = no clock restrictions)
 
 ### 3. Application-Based Control
 There are three lists at the bottom of the window:
