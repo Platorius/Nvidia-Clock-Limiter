@@ -24,7 +24,7 @@ except ImportError:
 
 CONFIG_FILE = "config.json"
 APP_NAME = "Nvidia Clock Limiter"
-VERSION = "1.0.10" # Bugfix: Autostart-Haken prüft nun, ob der Pfad in der Registry korrekt ist
+VERSION = "1.1.0" # Major Update: Diagnose-Trigger auf 8 Wechsel erhöht (verhindert Fehlalarme bei Kaskaden)
 
 COLOR_INACTIVE = "#007acc"
 COLOR_STD      = "#76b900"
@@ -47,7 +47,8 @@ class GpuSaverApp:
 
         # Diagnose Variablen
         self.check_oscillation_var = tk.BooleanVar(value=False)
-        self.state_change_history = deque(maxlen=6) 
+        # UPDATE: Wir brauchen 9 Punkte für 8 Wechsel
+        self.state_change_history = deque(maxlen=9) 
         self.last_warning_time = 0 
         self.warning_popup_open = False
 
@@ -64,7 +65,7 @@ class GpuSaverApp:
         # --- VARIABLEN ---
         self.lang_var = tk.StringVar(value="Deutsch")
         
-        # Alle Checkboxen default auf FALSE
+        # Defaults FALSE
         self.autostart_var = tk.BooleanVar(value=False)
         self.start_min_var = tk.BooleanVar(value=False)
         self.close_to_tray_var = tk.BooleanVar(value=False)
@@ -72,6 +73,7 @@ class GpuSaverApp:
         self.auto_limit_auto_var = tk.BooleanVar(value=False)
         self.use_dynamic_load_var = tk.BooleanVar(value=False)
 
+        # Profile FALSE
         self.enable_lim2_var = tk.BooleanVar(value=False)
         self.enable_lim3_var = tk.BooleanVar(value=False)
         
@@ -120,7 +122,8 @@ class GpuSaverApp:
                 "err_lim2_empty": "Fehler: '2. Limit' ist aktiviert, aber keine MHz Werte eingetragen!",
                 "err_lim3_empty": "Fehler: '3. Limit' ist aktiviert, aber keine MHz Werte eingetragen!",
                 "msg_osc_title": "Oszillations-Warnung",
-                "msg_osc_text": "Achtung: Es wurde ein ständiger Wechsel zwischen Profilen erkannt!\n\nDas Programm wechselt sehr schnell hin und her (Teufelskreislauf).\n\nEmpfehlung:\n1. Erhöhen Sie die 'Zeit (ms)' bei Deaktivieren.\n2. Oder senken Sie die %-Grenze bei Deaktivieren.\n\n(Warnung pausiert für 60s)"
+                "msg_osc_text": "Achtung: Es wurde ein ständiger Wechsel zwischen Profilen erkannt!\n\nEmpfehlung:\n1. Erhöhen Sie die 'Zeit (ms)' bei Deaktivieren.\n2. Oder senken Sie die %-Grenze bei Deaktivieren.\n\n(Warnung pausiert für 60s)",
+                "err_runtime_change": "Aktion verweigert!\n\nBitte beenden Sie zuerst die Taktbegrenzung ('Begrenzung aufheben'), um Profile zu aktivieren oder zu deaktivieren."
             },
             "English": {
                 "title": f"{APP_NAME} v{VERSION} - {self.gpu_name}",
@@ -158,7 +161,8 @@ class GpuSaverApp:
                 "err_lim2_empty": "Error: '2. Limit' is enabled but MHz values are missing!",
                 "err_lim3_empty": "Error: '3. Limit' is enabled but MHz values are missing!",
                 "msg_osc_title": "Oscillation Warning",
-                "msg_osc_text": "Warning: Rapid cycling between profiles detected!\n\nThe program is switching back and forth very quickly.\n\nRecommendation:\n1. Increase 'Time (ms)' for Deactivation.\n2. Or lower the % threshold for Deactivation.\n\n(Warning paused for 60s)"
+                "msg_osc_text": "Warning: Rapid cycling between profiles detected!\n\nThe program is switching back and forth very quickly.\n\nRecommendation:\n1. Increase 'Time (ms)' for Deactivation.\n2. Or lower the % threshold for Deactivation.\n\n(Warning paused for 60s)",
+                "err_runtime_change": "Action denied!\n\nPlease stop the limiter first ('Remove Limits') to enable or disable profiles."
             }
         }
 
@@ -198,7 +202,18 @@ class GpuSaverApp:
         self.update_title()
         self.setup_gui()
 
+    def on_oscillation_toggle(self):
+        self.save_config()
+        self.last_warning_time = 0
+        self.state_change_history.clear()
+
     def on_lim2_check(self):
+        T = self.translations[self.lang_var.get()]
+        if self.is_running:
+            messagebox.showerror("Error", T["err_runtime_change"])
+            self.enable_lim2_var.set(not self.enable_lim2_var.get()) 
+            return
+
         self.save_config()
         self.load_config()
         if not self.enable_lim2_var.get():
@@ -207,6 +222,12 @@ class GpuSaverApp:
         self.setup_gui() 
 
     def on_lim3_check(self):
+        T = self.translations[self.lang_var.get()]
+        if self.is_running:
+            messagebox.showerror("Error", T["err_runtime_change"])
+            self.enable_lim3_var.set(not self.enable_lim3_var.get())
+            return
+
         self.save_config()
         self.load_config()
         if self.enable_lim3_var.get():
@@ -242,7 +263,9 @@ class GpuSaverApp:
         opts_frame_bottom.pack(padx=10, pady=(0, 10), fill="x")
         r3 = ttk.Frame(opts_frame_bottom); r3.pack(fill="x", padx=5, pady=2)
         ttk.Checkbutton(r3, text=T["dynamic"], variable=self.use_dynamic_load_var, command=self.save_config).pack(side="left", padx=(0, 15))
-        ttk.Checkbutton(r3, text=T["osc_warn"], variable=self.check_oscillation_var, command=self.save_config).pack(side="left", padx=(0, 15))
+        
+        # Oszillations-Warnung Checkbox
+        ttk.Checkbutton(r3, text=T["osc_warn"], variable=self.check_oscillation_var, command=self.on_oscillation_toggle).pack(side="left", padx=(0, 15))
 
         ttk.Label(r3, text=T["rate"]).pack(side="left", padx=(10, 5))
         self.entry_sampling_rate = ttk.Entry(r3, width=6)
@@ -375,9 +398,17 @@ class GpuSaverApp:
         sv(e_d, self.config_data.get(f"{key}_deact", "30"))
         sv(e_dt, self.config_data.get(f"{key}_deact_time", "3000"))
 
+    # --- HELFER FUNKTION ---
+    def record_state_change(self, new_tier):
+        if self.check_oscillation_var.get():
+            now_t = time.time()
+            self.state_change_history.append((new_tier, now_t))
+            self.check_for_oscillation()
+
     # --- DIAGNOSE FUNKTION ---
     def check_for_oscillation(self):
-        if len(self.state_change_history) < 5: return
+        # UPDATE: Jetzt erst ab 9 Einträgen (8 Intervalle) prüfen
+        if len(self.state_change_history) < 9: return
 
         history = list(self.state_change_history)
         fast_switches = 0
@@ -385,28 +416,25 @@ class GpuSaverApp:
         for i in range(1, len(history)):
             tier_now, time_now = history[i]
             tier_prev, time_prev = history[i-1]
-            time_diff = (time_now - time_prev) * 1000 # ms
+            time_diff = (time_now - time_prev) * 1000 
             
             limit_ref = 0
-            
-            # ABSTIEG
             if tier_now < tier_prev:
                 if tier_prev == 3: limit_ref = self.get_val("unlock_deact_time") 
                 elif tier_prev == 2: limit_ref = self.get_val("lim3_deact_time")
                 elif tier_prev == 1: limit_ref = self.get_val("lim2_deact_time")
-            
-            # AUFSTIEG
             elif tier_now > tier_prev:
                 if tier_now == 3: limit_ref = self.get_val("unlock_act_time")
                 elif tier_now == 2: limit_ref = self.get_val("lim3_act_time")
                 elif tier_now == 1: limit_ref = self.get_val("lim2_act_time")
 
-            threshold = limit_ref + 2000 
+            threshold = limit_ref + 3000 
             
             if limit_ref > 0 and time_diff < threshold:
                 fast_switches += 1
 
-        if fast_switches >= 4:
+        # UPDATE: Erst bei 8 zu schnellen Wechseln warnen
+        if fast_switches >= 8:
             self.trigger_warning()
 
     def _show_warning_modal(self):
@@ -415,11 +443,8 @@ class GpuSaverApp:
         self.warning_popup_open = False 
 
     def trigger_warning(self):
-        if self.warning_popup_open:
-            return
-
-        if time.time() < self.last_warning_time + 60:
-            return
+        if self.warning_popup_open: return
+        if time.time() < self.last_warning_time + 60: return
 
         self.last_warning_time = time.time()
         self.warning_popup_open = True 
@@ -472,15 +497,11 @@ class GpuSaverApp:
             
             # --- STATUS WECHSEL ---
             if target_tier != self.state_tier:
-                # DIAGNOSE: Nur wenn Checkbox an
-                if self.check_oscillation_var.get():
-                    now_t = time.time()
-                    self.state_change_history.append((target_tier, now_t))
-                    self.check_for_oscillation()
-
+                
                 if target_tier > self.state_tier:
                     self.state_tier = target_tier
-                    self.last_state_change_time = time.time() 
+                    self.last_state_change_time = time.time()
+                    self.record_state_change(self.state_tier) 
 
                 elif target_tier < self.state_tier:
                     can_drop = False
@@ -513,7 +534,8 @@ class GpuSaverApp:
                     
                     if can_drop:
                         self.state_tier = self.get_active_tier_below(self.state_tier)
-                        self.last_state_change_time = time.time() 
+                        self.last_state_change_time = time.time()
+                        self.record_state_change(self.state_tier) 
 
             final_tier = self.state_tier
             t_str = "Standard"; t_col = COLOR_STD
@@ -563,7 +585,7 @@ class GpuSaverApp:
         else:
             self.is_running = False; self.stop_event.set(); self.btn_start.config(text=T["btn_start"])
             self.status_label.config(text=T["status_off"], fg=COLOR_INACTIVE); self.reset_limits(); self.current_mode_name = "Unknown"; self.update_tray_color(COLOR_INACTIVE); self.load_history.clear()
-            self.state_change_history.clear() # Reset Diagnose
+            self.state_change_history.clear() 
 
     def run_smi(self, args):
         try:
@@ -672,24 +694,19 @@ class GpuSaverApp:
         ttk.Button(picker, text="Add", command=sel).pack()
     def remove_entry(self, lbox):
         if lbox.curselection(): lbox.delete(lbox.curselection()); self.save_config()
-    # --- UPDATE: Smarter Registry Check ---
     def check_autostart_registry(self):
         try:
             k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
             v, _ = winreg.QueryValueEx(k, "NvidiaClockLimiter")
             winreg.CloseKey(k)
-            
-            # CHECK: Stimmt der Pfad in der Registry mit der aktuellen .exe überein?
-            current_exe = sys.executable.replace("/", "\\") # Pfad-Trenner normieren
+            current_exe = sys.executable.replace("/", "\\") 
             if current_exe.lower() in v.lower():
                 self.autostart_var.set(True)
                 self.start_min_var.set("--minimized" in v)
             else:
-                # Schlüssel existiert, zeigt aber auf eine andere Datei -> Haken AUS
                 self.autostart_var.set(False)
         except: 
             self.autostart_var.set(False)
-
     def update_autostart_registry(self):
         if not self.autostart_var.get():
             try:
