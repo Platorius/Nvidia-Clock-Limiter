@@ -24,7 +24,7 @@ except ImportError:
 
 CONFIG_FILE = "config.json"
 APP_NAME = "Nvidia Clock Limiter"
-VERSION = "1.1.0" # Major Update: Diagnose-Trigger auf 8 Wechsel erhöht (verhindert Fehlalarme bei Kaskaden)
+VERSION = "1.3.6" # Bugfix: State Reset on Stop/Start & Code Cleanup
 
 COLOR_INACTIVE = "#007acc"
 COLOR_STD      = "#76b900"
@@ -32,6 +32,8 @@ COLOR_LIM2     = "#FFC400"
 COLOR_LIM3     = "#FF6600"
 COLOR_UNLOCK   = "#FF0000"
 COLOR_DISABLED = "#555555"
+BG_DISABLED    = "#f0f0f0"
+BG_NORMAL      = "#ffffff"
 
 class GpuSaverApp:
     def __init__(self, root):
@@ -39,15 +41,21 @@ class GpuSaverApp:
         self.root.geometry("1250x950")
         self.root.resizable(False, False)
         
+        # CLEANUP: Pfad nur einmal berechnen
+        if getattr(sys, 'frozen', False):
+            self.base_path = os.path.dirname(sys.executable)
+        else:
+            self.base_path = os.path.dirname(os.path.abspath(__file__))
+        
         self.is_running = False
         self.current_mode_name = "Unknown" 
         self.monitor_thread = None
         self.stop_event = threading.Event()
         self.last_state_change_time = time.time()
+        self.last_enforce_time = 0
 
-        # Diagnose Variablen
+        # Diagnose
         self.check_oscillation_var = tk.BooleanVar(value=False)
-        # UPDATE: Wir brauchen 9 Punkte für 8 Wechsel
         self.state_change_history = deque(maxlen=9) 
         self.last_warning_time = 0 
         self.warning_popup_open = False
@@ -65,7 +73,6 @@ class GpuSaverApp:
         # --- VARIABLEN ---
         self.lang_var = tk.StringVar(value="Deutsch")
         
-        # Defaults FALSE
         self.autostart_var = tk.BooleanVar(value=False)
         self.start_min_var = tk.BooleanVar(value=False)
         self.close_to_tray_var = tk.BooleanVar(value=False)
@@ -73,7 +80,6 @@ class GpuSaverApp:
         self.auto_limit_auto_var = tk.BooleanVar(value=False)
         self.use_dynamic_load_var = tk.BooleanVar(value=False)
 
-        # Profile FALSE
         self.enable_lim2_var = tk.BooleanVar(value=False)
         self.enable_lim3_var = tk.BooleanVar(value=False)
         
@@ -82,6 +88,20 @@ class GpuSaverApp:
         self.saved_lim3_core = ""; self.saved_lim3_mem = ""
         
         self.list_unlock = []; self.list_lim2 = []; self.list_lim3 = []
+        
+        # CACHE
+        self.cache_apps_unlock = set()
+        self.cache_apps_lim2 = set()
+        self.cache_apps_lim3 = set()
+        self.cache_enable_lim2 = False
+        self.cache_enable_lim3 = False
+        self.cache_use_dynamic = False
+        self.cache_check_oscillation = False
+        self.cache_settings_load = {}
+        
+        self.cache_rate_general = 500
+        self.cache_rate_process = 3000
+
         self.load_history = deque()
         self.state_tier = 0 
 
@@ -97,7 +117,8 @@ class GpuSaverApp:
                 "logic": "Steuerungs-Logik",
                 "dynamic": "Anhand GPU- und VID-Auslastung steuern",
                 "osc_warn": "Warnung bei Teufelskreislauf (Diagnose)",
-                "rate": "| Abtastrate (ms):",
+                "rate_gen": "Allgemeine Abtastrate (ms):",
+                "rate_proc": "Abtastrate Programmlisten (ms):",
                 "info_btn": "ℹ Erlaubte Taktraten",
                 "std_lim": "1. Standard-Limits (Pflicht)",
                 "lim2": "2. Limits (Optional)",
@@ -136,7 +157,8 @@ class GpuSaverApp:
                 "logic": "Control Logic",
                 "dynamic": "Control via GPU and VID load",
                 "osc_warn": "Warn on rapid cycling (Diagnosis)",
-                "rate": "| Sampling Rate (ms):",
+                "rate_gen": "General Sampling Rate (ms):",
+                "rate_proc": "App List Sampling Rate (ms):",
                 "info_btn": "ℹ Supported Clocks",
                 "std_lim": "1. Standard Limits (Mandatory)",
                 "lim2": "2. Limits (Optional)",
@@ -182,15 +204,14 @@ class GpuSaverApp:
         except: pass 
 
         self.setup_gui()
+        self.update_ui_states() 
 
-        if hasattr(self, 'first_load'): pass
-        else:
-            self.first_load = True
-            if "--autostart" in sys.argv:
-                if "--minimized" in sys.argv: self.root.after(0, self.minimize_to_tray)
-                if self.auto_limit_auto_var.get(): self.root.after(500, self.toggle_monitoring)
-            elif self.auto_limit_manual_var.get():
-                self.root.after(500, self.toggle_monitoring)
+        # CLEANUP: first_load entfernt, Autostart-Logik optimiert
+        if "--autostart" in sys.argv:
+            if "--minimized" in sys.argv: self.root.after(0, self.minimize_to_tray)
+            if self.auto_limit_auto_var.get(): self.root.after(500, self.toggle_monitoring)
+        elif self.auto_limit_manual_var.get():
+            self.root.after(500, self.toggle_monitoring)
 
     def update_title(self):
         T = self.translations[self.lang_var.get()]
@@ -201,39 +222,86 @@ class GpuSaverApp:
         self.load_config()
         self.update_title()
         self.setup_gui()
+        self.update_ui_states() 
 
     def on_oscillation_toggle(self):
         self.save_config()
         self.last_warning_time = 0
         self.state_change_history.clear()
 
-    def on_lim2_check(self):
+    # --- UI STATE UPDATE ---
+    def update_ui_states(self):
+        en2 = self.enable_lim2_var.get()
+        if not en2:
+            self.enable_lim3_var.set(False) 
+        
+        en3 = self.enable_lim3_var.get()
+        if en3 and not en2:
+            self.enable_lim2_var.set(True) 
+            en2 = True
+
+        st2 = "normal" if en2 else "disabled"
+        bg2 = BG_NORMAL if en2 else BG_DISABLED
+        style2 = "Yellow.TLabelframe" if en2 else "Gray.TLabelframe"
+        
+        self.entry_lim2_core.config(state=st2)
+        self.entry_lim2_mem.config(state=st2)
+        
+        self.frame_lim2.config(style=style2)
+        self.frame_list_lim2.config(style=style2) 
+        
+        self.lbox_lim2.config(bg=bg2)
+        self.entry_lim2_act.config(state=st2)
+        self.entry_lim2_act_time.config(state=st2)
+        self.entry_lim2_deact.config(state=st2)
+        self.entry_lim2_deact_time.config(state=st2)
+        
+        for btn in self.btns_lim2: btn.config(state=st2)
+        
+        st3 = "normal" if en3 else "disabled"
+        bg3 = BG_NORMAL if en3 else BG_DISABLED
+        style3 = "Orange.TLabelframe" if en3 else "Gray.TLabelframe"
+        
+        self.entry_lim3_core.config(state=st3)
+        self.entry_lim3_mem.config(state=st3)
+        
+        self.frame_lim3.config(style=style3)
+        self.frame_list_lim3.config(style=style3)
+        
+        self.lbox_lim3.config(bg=bg3)
+        self.entry_lim3_act.config(state=st3)
+        self.entry_lim3_act_time.config(state=st3)
+        self.entry_lim3_deact.config(state=st3)
+        self.entry_lim3_deact_time.config(state=st3)
+        
+        for btn in self.btns_lim3: btn.config(state=st3)
+
+        self.save_config()
+
+    def on_lim_check_click(self):
         T = self.translations[self.lang_var.get()]
         if self.is_running:
             messagebox.showerror("Error", T["err_runtime_change"])
-            self.enable_lim2_var.set(not self.enable_lim2_var.get()) 
+            self.enable_lim2_var.set(self.cache_enable_lim2)
+            self.enable_lim3_var.set(self.cache_enable_lim3)
             return
+        self.update_ui_states()
 
-        self.save_config()
-        self.load_config()
-        if not self.enable_lim2_var.get():
-            self.enable_lim3_var.set(False)
-            self.save_config(); self.load_config()
-        self.setup_gui() 
-
-    def on_lim3_check(self):
-        T = self.translations[self.lang_var.get()]
-        if self.is_running:
-            messagebox.showerror("Error", T["err_runtime_change"])
-            self.enable_lim3_var.set(not self.enable_lim3_var.get())
-            return
-
-        self.save_config()
-        self.load_config()
-        if self.enable_lim3_var.get():
-            self.enable_lim2_var.set(True)
-            self.save_config(); self.load_config()
-        self.setup_gui()
+    def validate_and_correct_rates(self, event=None):
+        for entry in [self.entry_rate_general, self.entry_rate_process]:
+            try:
+                if not entry.winfo_exists(): continue 
+                
+                val = int(entry.get())
+                if val < 100:
+                    entry.delete(0, tk.END)
+                    entry.insert(0, "100")
+            except:
+                try:
+                    entry.delete(0, tk.END)
+                    if entry == self.entry_rate_general: entry.insert(0, "500")
+                    else: entry.insert(0, "3000")
+                except: pass
 
     def setup_gui(self):
         for widget in self.root.winfo_children(): widget.destroy()
@@ -263,15 +331,24 @@ class GpuSaverApp:
         opts_frame_bottom.pack(padx=10, pady=(0, 10), fill="x")
         r3 = ttk.Frame(opts_frame_bottom); r3.pack(fill="x", padx=5, pady=2)
         ttk.Checkbutton(r3, text=T["dynamic"], variable=self.use_dynamic_load_var, command=self.save_config).pack(side="left", padx=(0, 15))
-        
-        # Oszillations-Warnung Checkbox
         ttk.Checkbutton(r3, text=T["osc_warn"], variable=self.check_oscillation_var, command=self.on_oscillation_toggle).pack(side="left", padx=(0, 15))
-
-        ttk.Label(r3, text=T["rate"]).pack(side="left", padx=(10, 5))
-        self.entry_sampling_rate = ttk.Entry(r3, width=6)
-        self.entry_sampling_rate.insert(0, self.config_data.get("sampling_rate", "500"))
-        self.entry_sampling_rate.pack(side="left")
         ttk.Button(opts_frame_bottom, text=T["info_btn"], command=self.show_hardware_info).pack(side="right", padx=5, pady=5)
+
+        r4 = ttk.Frame(opts_frame_bottom); r4.pack(fill="x", padx=5, pady=(5,5))
+        
+        ttk.Label(r4, text=T["rate_gen"]).pack(side="left", padx=(0, 5))
+        self.entry_rate_general = ttk.Entry(r4, width=6)
+        self.entry_rate_general.insert(0, self.config_data.get("rate_general", "500"))
+        self.entry_rate_general.pack(side="left", padx=(0, 20))
+        self.entry_rate_general.bind("<FocusOut>", self.validate_and_correct_rates)
+        self.entry_rate_general.bind("<Return>", self.validate_and_correct_rates)
+
+        ttk.Label(r4, text=T["rate_proc"]).pack(side="left", padx=(0, 5))
+        self.entry_rate_process = ttk.Entry(r4, width=6)
+        self.entry_rate_process.insert(0, self.config_data.get("rate_process", "3000"))
+        self.entry_rate_process.pack(side="left")
+        self.entry_rate_process.bind("<FocusOut>", self.validate_and_correct_rates)
+        self.entry_rate_process.bind("<Return>", self.validate_and_correct_rates)
 
         # UNTEN
         settings_container = ttk.Frame(self.root)
@@ -280,41 +357,37 @@ class GpuSaverApp:
         # STANDARD
         frame_std = ttk.LabelFrame(settings_container, text=T["std_lim"], style="Green.TLabelframe")
         frame_std.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        self.create_entry_pair(frame_std, "std", self.saved_std_core, self.saved_std_mem, True)
+        self.create_entry_pair(frame_std, "std", self.saved_std_core, self.saved_std_mem)
 
         # LIMIT 2
-        st2 = "Yellow.TLabelframe" if self.enable_lim2_var.get() else "Gray.TLabelframe"
-        frame_lim2 = ttk.LabelFrame(settings_container, text=T["lim2"], style=st2)
-        frame_lim2.pack(side="left", fill="both", expand=True, padx=5)
-        chk2 = ttk.Checkbutton(frame_lim2, text=T["enable_prof"], variable=self.enable_lim2_var, command=self.on_lim2_check)
+        self.frame_lim2 = ttk.LabelFrame(settings_container, text=T["lim2"], style="Gray.TLabelframe")
+        self.frame_lim2.pack(side="left", fill="both", expand=True, padx=5)
+        chk2 = ttk.Checkbutton(self.frame_lim2, text=T["enable_prof"], variable=self.enable_lim2_var, command=self.on_lim_check_click)
         chk2.grid(row=0, column=0, columnspan=2, sticky="w", padx=5)
-        self.create_entry_pair(frame_lim2, "lim2", self.saved_lim2_core, self.saved_lim2_mem, self.enable_lim2_var.get(), start_row=1)
+        self.create_entry_pair(self.frame_lim2, "lim2", self.saved_lim2_core, self.saved_lim2_mem, start_row=1)
 
         # LIMIT 3
-        st3 = "Orange.TLabelframe" if self.enable_lim3_var.get() else "Gray.TLabelframe"
-        frame_lim3 = ttk.LabelFrame(settings_container, text=T["lim3"], style=st3)
-        frame_lim3.pack(side="left", fill="both", expand=True, padx=(5, 0))
-        chk3 = ttk.Checkbutton(frame_lim3, text=T["enable_prof"], variable=self.enable_lim3_var, command=self.on_lim3_check)
+        self.frame_lim3 = ttk.LabelFrame(settings_container, text=T["lim3"], style="Gray.TLabelframe")
+        self.frame_lim3.pack(side="left", fill="both", expand=True, padx=(5, 0))
+        chk3 = ttk.Checkbutton(self.frame_lim3, text=T["enable_prof"], variable=self.enable_lim3_var, command=self.on_lim_check_click)
         chk3.grid(row=0, column=0, columnspan=2, sticky="w", padx=5)
-        self.create_entry_pair(frame_lim3, "lim3", self.saved_lim3_core, self.saved_lim3_mem, self.enable_lim3_var.get(), start_row=1)
+        self.create_entry_pair(self.frame_lim3, "lim3", self.saved_lim3_core, self.saved_lim3_mem, start_row=1)
 
         # LISTEN
         lists_container = ttk.Frame(self.root)
         lists_container.pack(padx=10, pady=5, fill="both", expand=True)
 
         f1 = ttk.Frame(lists_container); f1.pack(side="left", fill="both", expand=True, padx=(0,5))
-        self.build_list_ui(f1, T["unlock_list"], self.list_unlock, "unlock", True)
-        self.build_load_ui(f1, "unlock", "GPU", True)
+        self.build_list_ui(f1, T["unlock_list"], self.list_unlock, "unlock")
+        self.build_load_ui(f1, "unlock", "GPU")
 
         f2 = ttk.Frame(lists_container); f2.pack(side="left", fill="both", expand=True, padx=5)
-        en2 = self.enable_lim2_var.get()
-        self.build_list_ui(f2, T["lim2_list"], self.list_lim2, "lim2", en2)
-        self.build_load_ui(f2, "lim2", "VID", en2)
+        self.build_list_ui(f2, T["lim2_list"], self.list_lim2, "lim2")
+        self.build_load_ui(f2, "lim2", "VID")
 
         f3 = ttk.Frame(lists_container); f3.pack(side="left", fill="both", expand=True, padx=(5,0))
-        en3 = self.enable_lim3_var.get()
-        self.build_list_ui(f3, T["lim3_list"], self.list_lim3, "lim3", en3)
-        self.build_load_ui(f3, "lim3", "VID", en3)
+        self.build_list_ui(f3, T["lim3_list"], self.list_lim3, "lim3")
+        self.build_load_ui(f3, "lim3", "VID")
 
         ctrl_frame = ttk.Frame(self.root)
         ctrl_frame.pack(padx=15, pady=15, fill="x")
@@ -327,14 +400,12 @@ class GpuSaverApp:
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_window_close_attempt)
 
-    def create_entry_pair(self, parent, key, def_c, def_m, enabled, start_row=0):
+    def create_entry_pair(self, parent, key, def_c, def_m, start_row=0):
         e_c = ttk.Entry(parent, width=8)
         e_c.insert(0, def_c) 
         e_m = ttk.Entry(parent, width=8)
         e_m.insert(0, def_m)
-        if not enabled:
-            e_c.config(state='disabled')
-            e_m.config(state='disabled')
+        
         ttk.Label(parent, text="Core:").grid(row=start_row, column=0, padx=5, pady=5)
         e_c.grid(row=start_row, column=1, padx=5, pady=5)
         ttk.Label(parent, text="VRAM:").grid(row=start_row+1, column=0, padx=5, pady=5)
@@ -342,20 +413,20 @@ class GpuSaverApp:
         setattr(self, f"entry_{key}_core", e_c)
         setattr(self, f"entry_{key}_mem", e_m)
 
-    def build_list_ui(self, parent, title, source, ltype, enabled):
+    def build_list_ui(self, parent, title, source, ltype):
         T = self.translations[self.lang_var.get()]
         style_name = "Bold.TLabelframe"
-        if not enabled: style_name = "Gray.TLabelframe"
-        elif ltype == "unlock": style_name = "Red.TLabelframe"
-        elif ltype == "lim3": style_name = "Orange.TLabelframe"
-        elif ltype == "lim2": style_name = "Yellow.TLabelframe"
+        if ltype == "unlock": style_name = "Red.TLabelframe"
 
         c = ttk.LabelFrame(parent, text=title, style=style_name)
         c.pack(fill="both", expand=True)
+        
+        if ltype == "lim2": self.frame_list_lim2 = c
+        elif ltype == "lim3": self.frame_list_lim3 = c
+
         lf = ttk.Frame(c); lf.pack(fill="both", expand=True, padx=5, pady=5)
         sc = ttk.Scrollbar(lf); sc.pack(side="right", fill="y")
         lb = tk.Listbox(lf, height=6, yscrollcommand=sc.set, font=("Consolas", 9))
-        if not enabled: lb.config(bg="#f0f0f0", fg="#888888")
         lb.pack(side="left", fill="both", expand=True); sc.config(command=lb.yview)
         for x in source: lb.insert(tk.END, x)
         
@@ -363,35 +434,37 @@ class GpuSaverApp:
         elif ltype=="lim2": self.lbox_lim2 = lb
         elif ltype=="lim3": self.lbox_lim3 = lb
         
-        st = "normal" if enabled else "disabled"
         tf = ttk.Frame(c); tf.pack(fill="x", padx=5, pady=5)
-        ttk.Button(tf, text=T["btn_browse"], state=st, command=lambda: self.browse_file(lb)).pack(side="left", fill="x", expand=True)
-        ttk.Button(tf, text=T["btn_proc"], state=st, command=lambda: self.open_process_picker(lb)).pack(side="left", fill="x", expand=True)
-        ttk.Button(c, text=T["btn_rem"], state=st, command=lambda: self.remove_entry(lb)).pack(fill="x", padx=5, pady=(0,5))
+        b1 = ttk.Button(tf, text=T["btn_browse"], command=lambda: self.browse_file(lb))
+        b1.pack(side="left", fill="x", expand=True)
+        b2 = ttk.Button(tf, text=T["btn_proc"], command=lambda: self.open_process_picker(lb))
+        b2.pack(side="left", fill="x", expand=True)
+        b3 = ttk.Button(c, text=T["btn_rem"], command=lambda: self.remove_entry(lb))
+        b3.pack(fill="x", padx=5, pady=(0,5))
 
-    def build_load_ui(self, parent, key, label_type, enabled):
+        if ltype == "lim2": self.btns_lim2 = [b1, b2, b3]
+        elif ltype == "lim3": self.btns_lim3 = [b1, b2, b3]
+
+    def build_load_ui(self, parent, key, label_type):
         T = self.translations[self.lang_var.get()]
-        st = "normal" if enabled else "disabled"
         f = ttk.LabelFrame(parent, text=T["load_ctrl"].format(type=label_type))
         f.pack(fill="x", pady=(5,0))
         r1 = ttk.Frame(f); r1.pack(fill="x", pady=2)
         ttk.Label(r1, text=T["act_gt"]).pack(side="left")
-        e_a = ttk.Entry(r1, width=5, state=st); e_a.pack(side="left")
+        e_a = ttk.Entry(r1, width=5); e_a.pack(side="left")
         ttk.Label(r1, text=T["time"]).pack(side="left")
-        e_at = ttk.Entry(r1, width=6, state=st); e_at.pack(side="left")
+        e_at = ttk.Entry(r1, width=6); e_at.pack(side="left")
         r2 = ttk.Frame(f); r2.pack(fill="x", pady=2)
         ttk.Label(r2, text=T["deact_lt"]).pack(side="left")
-        e_d = ttk.Entry(r2, width=5, state=st); e_d.pack(side="left")
+        e_d = ttk.Entry(r2, width=5); e_d.pack(side="left")
         ttk.Label(r2, text=T["time"]).pack(side="left")
-        e_dt = ttk.Entry(r2, width=6, state=st); e_dt.pack(side="left")
+        e_dt = ttk.Entry(r2, width=6); e_dt.pack(side="left")
         
         setattr(self, f"entry_{key}_act", e_a); setattr(self, f"entry_{key}_act_time", e_at)
         setattr(self, f"entry_{key}_deact", e_d); setattr(self, f"entry_{key}_deact_time", e_dt)
         
         def sv(e, v): 
-            e.config(state="normal")
             e.delete(0, tk.END); e.insert(0, str(v))
-            if not enabled: e.config(state="disabled")
         
         sv(e_a, self.config_data.get(f"{key}_act", "90"))
         sv(e_at, self.config_data.get(f"{key}_act_time", "1000"))
@@ -400,18 +473,46 @@ class GpuSaverApp:
 
     # --- HELFER FUNKTION ---
     def record_state_change(self, new_tier):
-        if self.check_oscillation_var.get():
+        if self.cache_check_oscillation:
             now_t = time.time()
             self.state_change_history.append((new_tier, now_t))
             self.check_for_oscillation()
 
+    def update_runtime_cache(self):
+        self.validate_and_correct_rates()
+        try:
+            self.cache_apps_unlock = set([x.lower() for x in self.lbox_unlock.get(0, tk.END)])
+            self.cache_apps_lim2 = set([x.lower() for x in self.lbox_lim2.get(0, tk.END)])
+            self.cache_apps_lim3 = set([x.lower() for x in self.lbox_lim3.get(0, tk.END)])
+        except: pass
+        
+        self.cache_enable_lim2 = self.enable_lim2_var.get()
+        self.cache_enable_lim3 = self.enable_lim3_var.get()
+        self.cache_use_dynamic = self.use_dynamic_load_var.get()
+        self.cache_check_oscillation = self.check_oscillation_var.get()
+
+        def gv(k): return self.get_val(k)
+        self.cache_settings_load = {
+            "unlock_act": gv("unlock_act"), "unlock_act_time": gv("unlock_act_time"),
+            "lim3_act": gv("lim3_act"), "lim3_act_time": gv("lim3_act_time"),
+            "lim2_act": gv("lim2_act"), "lim2_act_time": gv("lim2_act_time"),
+            "unlock_deact": gv("unlock_deact"), "unlock_deact_time": gv("unlock_deact_time"),
+            "lim3_deact": gv("lim3_deact"), "lim3_deact_time": gv("lim3_deact_time"),
+            "lim2_deact": gv("lim2_deact"), "lim2_deact_time": gv("lim2_deact_time"),
+        }
+        
+        try: self.cache_rate_general = int(self.entry_rate_general.get())
+        except: self.cache_rate_general = 500
+        try: self.cache_rate_process = int(self.entry_rate_process.get())
+        except: self.cache_rate_process = 3000
+
     # --- DIAGNOSE FUNKTION ---
     def check_for_oscillation(self):
-        # UPDATE: Jetzt erst ab 9 Einträgen (8 Intervalle) prüfen
         if len(self.state_change_history) < 9: return
 
         history = list(self.state_change_history)
         fast_switches = 0
+        s = self.cache_settings_load
         
         for i in range(1, len(history)):
             tier_now, time_now = history[i]
@@ -420,20 +521,19 @@ class GpuSaverApp:
             
             limit_ref = 0
             if tier_now < tier_prev:
-                if tier_prev == 3: limit_ref = self.get_val("unlock_deact_time") 
-                elif tier_prev == 2: limit_ref = self.get_val("lim3_deact_time")
-                elif tier_prev == 1: limit_ref = self.get_val("lim2_deact_time")
+                if tier_prev == 3: limit_ref = s["unlock_deact_time"]
+                elif tier_prev == 2: limit_ref = s["lim3_deact_time"]
+                elif tier_prev == 1: limit_ref = s["lim2_deact_time"]
             elif tier_now > tier_prev:
-                if tier_now == 3: limit_ref = self.get_val("unlock_act_time")
-                elif tier_now == 2: limit_ref = self.get_val("lim3_act_time")
-                elif tier_now == 1: limit_ref = self.get_val("lim2_act_time")
+                if tier_now == 3: limit_ref = s["unlock_act_time"]
+                elif tier_now == 2: limit_ref = s["lim3_act_time"]
+                elif tier_now == 1: limit_ref = s["lim2_act_time"]
 
             threshold = limit_ref + 3000 
             
             if limit_ref > 0 and time_diff < threshold:
                 fast_switches += 1
 
-        # UPDATE: Erst bei 8 zu schnellen Wechseln warnen
         if fast_switches >= 8:
             self.trigger_warning()
 
@@ -452,91 +552,149 @@ class GpuSaverApp:
         
         self.root.after(0, self._show_warning_modal)
 
-    # --- CORE LOOP ---
-    def get_active_tier_below(self, current_tier):
-        if current_tier == 3:
-            if self.enable_lim3_var.get(): return 2 
-            if self.enable_lim2_var.get(): return 1 
-            return 0 
-        if current_tier == 2:
-            if self.enable_lim2_var.get(): return 1
-            return 0 
-        return 0 
+    # --- CORE LOOP HELPERS ---
+    def get_avg_load(self, load_type, ms_duration):
+        # NUR DURCHSCHNITT (AVERAGE)
+        if not self.load_history: return 0
+        now = time.time()
+        total = 0; count = 0
+        idx = 1 if load_type == 'gpu' else 2
+        for entry in reversed(self.load_history):
+            t_stamp, l_gpu, l_vid = entry
+            if (now - t_stamp) * 1000 > float(ms_duration): break
+            total += (l_gpu if idx == 1 else l_vid)
+            count += 1
+        return (total / count) if count > 0 else 0
+
+    def update_status_text(self, text, color):
+        self.status_label.config(text=text, fg=color)
 
     def loop(self):
-        loop_cnt = 0
+        current_list_tier = 0 
+        next_process_scan_time = 0
+        s = self.cache_settings_load 
+
         while not self.stop_event.is_set():
-            loop_cnt += 1
             start_t = time.time()
             c, m, p, ug, uv = self.get_gpu_status()
             self.load_history.append((start_t, ug, uv))
             while self.load_history and (start_t - self.load_history[0][0]) > 10: self.load_history.popleft()
 
-            apps_ul = [x.lower() for x in self.lbox_unlock.get(0, tk.END)]
-            apps_l3 = [x.lower() for x in self.lbox_lim3.get(0, tk.END)] if self.enable_lim3_var.get() else []
-            apps_l2 = [x.lower() for x in self.lbox_lim2.get(0, tk.END)] if self.enable_lim2_var.get() else []
-            
-            list_tier = 0 
-            for proc in psutil.process_iter(['name']):
+            # 1. PROCESS SCANNER (Slow)
+            if start_t > next_process_scan_time:
+                next_process_scan_time = start_t + (self.cache_rate_process / 1000.0) 
+                current_list_tier = 0
                 try:
-                    pn = proc.info['name'].lower()
-                    if pn in apps_ul: list_tier = 3; break
-                    elif self.enable_lim3_var.get() and pn in apps_l3: list_tier = max(list_tier, 2)
-                    elif self.enable_lim2_var.get() and pn in apps_l2: list_tier = max(list_tier, 1)
+                    for proc in psutil.process_iter(['name']):
+                        try:
+                            pn = proc.info['name'].lower()
+                            if pn in self.cache_apps_unlock: 
+                                current_list_tier = 3; break
+                            elif self.cache_enable_lim3 and pn in self.cache_apps_lim3: 
+                                current_list_tier = max(current_list_tier, 2)
+                            elif self.cache_enable_lim2 and pn in self.cache_apps_lim2: 
+                                current_list_tier = max(current_list_tier, 1)
+                        except: pass
                 except: pass
 
-            boost_tier = 0
-            if self.use_dynamic_load_var.get():
-                if self.get_avg_load("gpu", self.get_val("unlock_act_time")) >= self.get_val("unlock_act"): boost_tier = 3
-                if boost_tier < 3 and self.enable_lim3_var.get():
-                    if self.get_avg_load("vid", self.get_val("lim3_act_time")) >= self.get_val("lim3_act"): boost_tier = max(boost_tier, 2)
-                if boost_tier < 2 and self.enable_lim2_var.get():
-                    if self.get_avg_load("vid", self.get_val("lim2_act_time")) >= self.get_val("lim2_act"): boost_tier = max(boost_tier, 1)
-
-            target_tier = max(list_tier, boost_tier)
+            # 2. STATE MACHINE (FSM Logic)
+            target_tier = self.state_tier
+            L_Tier = current_list_tier
+            use_dyn = self.cache_use_dynamic
             
-            # --- STATUS WECHSEL ---
-            if target_tier != self.state_tier:
+            # Helper zur Prüfung der "Guard Time" (Wartezeit nach Wechsel)
+            time_in_state_ms = (time.time() - self.last_state_change_time) * 1000
+            
+            # --- SZENARIO A: Wir sind im Standard (0) ---
+            if self.state_tier == 0:
+                # HOCHSCHALTEN (Jedes Ziel hat eigene Sperrfrist)
                 
-                if target_tier > self.state_tier:
-                    self.state_tier = target_tier
-                    self.last_state_change_time = time.time()
-                    self.record_state_change(self.state_tier) 
+                # Check Unlock
+                if time_in_state_ms > s["unlock_act_time"]:
+                    if L_Tier == 3 or (use_dyn and self.get_avg_load("gpu", s["unlock_act_time"]) > s["unlock_act"]):
+                        target_tier = 3
+                
+                # Check Lim 3 (Falls Unlock nicht getriggert)
+                if target_tier == 0 and self.cache_enable_lim3 and time_in_state_ms > s["lim3_act_time"]:
+                    if L_Tier == 2 or (use_dyn and self.get_avg_load("vid", s["lim3_act_time"]) > s["lim3_act"]):
+                        target_tier = 2
+                
+                # Check Lim 2 (Falls Unlock/Lim3 nicht getriggert)
+                if target_tier == 0 and self.cache_enable_lim2 and time_in_state_ms > s["lim2_act_time"]:
+                    if L_Tier == 1 or (use_dyn and self.get_avg_load("vid", s["lim2_act_time"]) > s["lim2_act"]):
+                        target_tier = 1
+            
+            # --- SZENARIO B: Wir sind im Unlock (3) ---
+            elif self.state_tier == 3:
+                # RUNTERSCHALTEN
+                stay = False
+                
+                # ZWINGENDE WARTEZEIT (DEACT GUARD)
+                if time_in_state_ms < s["unlock_deact_time"]:
+                    stay = True # Sperrfrist läuft -> Bleiben
+                else:
+                    # Zeit abgelaufen -> Durchschnitt prüfen
+                    if L_Tier == 3: stay = True
+                    elif use_dyn and self.get_avg_load("gpu", s["unlock_deact_time"]) >= s["unlock_deact"]: stay = True
+                
+                if not stay: target_tier = 2
 
-                elif target_tier < self.state_tier:
-                    can_drop = False
-                    now = time.time()
-                    time_in_state_ms = (now - self.last_state_change_time) * 1000
+            # --- SZENARIO C: Wir sind im 3. Limit (2) ---
+            elif self.state_tier == 2:
+                # HOCH (zu Unlock)
+                if time_in_state_ms > s["unlock_act_time"]:
+                    if L_Tier == 3 or (use_dyn and self.get_avg_load("gpu", s["unlock_act_time"]) > s["unlock_act"]):
+                        target_tier = 3
 
-                    if self.state_tier == 2 and not self.enable_lim3_var.get(): can_drop = True
-                    elif self.state_tier == 1 and not self.enable_lim2_var.get(): can_drop = True
+                # RUNTER (zu Lim 2) - Nur wenn nicht hochgeschaltet
+                if target_tier == 2:
+                    stay = False
+                    # ZWINGENDE WARTEZEIT (DEACT GUARD)
+                    if time_in_state_ms < s["lim3_deact_time"]:
+                        stay = True
                     else:
-                        if not self.use_dynamic_load_var.get(): 
-                            can_drop = True 
-                        else: 
-                            if self.state_tier == 3:
-                                req_wait = self.get_val("unlock_deact_time")
-                                if time_in_state_ms >= req_wait:
-                                    if self.get_avg_load("gpu", req_wait) < self.get_val("unlock_deact"): 
-                                        can_drop = True
-                            elif self.state_tier == 2: 
-                                req_wait = self.get_val("lim3_deact_time")
-                                if time_in_state_ms >= req_wait:
-                                    vid_low = self.get_avg_load("vid", req_wait) < self.get_val("lim3_deact")
-                                    gpu_low = self.get_avg_load("gpu", req_wait) < self.get_val("lim3_deact")
-                                    if vid_low and gpu_low: can_drop = True
-                            elif self.state_tier == 1: 
-                                req_wait = self.get_val("lim2_deact_time")
-                                if time_in_state_ms >= req_wait:
-                                    vid_low = self.get_avg_load("vid", req_wait) < self.get_val("lim2_deact")
-                                    gpu_low = self.get_avg_load("gpu", req_wait) < self.get_val("lim2_deact")
-                                    if vid_low and gpu_low: can_drop = True
+                        if L_Tier == 2: stay = True
+                        elif use_dyn:
+                            if self.get_avg_load("gpu", s["lim3_deact_time"]) >= s["lim3_deact"]: stay = True
+                            elif self.get_avg_load("vid", s["lim3_deact_time"]) >= s["lim3_deact"]: stay = True
                     
-                    if can_drop:
-                        self.state_tier = self.get_active_tier_below(self.state_tier)
-                        self.last_state_change_time = time.time()
-                        self.record_state_change(self.state_tier) 
+                    if not stay or not self.cache_enable_lim3:
+                        target_tier = 1
+            
+            # --- SZENARIO D: Wir sind im 2. Limit (1) ---
+            elif self.state_tier == 1:
+                # HOCH (zu Unlock)
+                if time_in_state_ms > s["unlock_act_time"]:
+                    if L_Tier == 3 or (use_dyn and self.get_avg_load("gpu", s["unlock_act_time"]) > s["unlock_act"]):
+                        target_tier = 3
+                
+                # HOCH (zu Lim 3)
+                if target_tier == 1 and self.cache_enable_lim3 and time_in_state_ms > s["lim3_act_time"]:
+                    if L_Tier == 2 or (use_dyn and self.get_avg_load("vid", s["lim3_act_time"]) > s["lim3_act"]):
+                        target_tier = 2
 
+                # RUNTER (zu Standard)
+                if target_tier == 1:
+                    stay = False
+                    # ZWINGENDE WARTEZEIT (DEACT GUARD)
+                    if time_in_state_ms < s["lim2_deact_time"]:
+                        stay = True
+                    else:
+                        if L_Tier == 1: stay = True
+                        elif use_dyn:
+                            if self.get_avg_load("gpu", s["lim2_deact_time"]) >= s["lim2_deact"]: stay = True
+                            elif self.get_avg_load("vid", s["lim2_deact_time"]) >= s["lim2_deact"]: stay = True
+                    
+                    if not stay or not self.cache_enable_lim2:
+                        target_tier = 0
+
+            # --- CHANGE EXECUTION ---
+            if target_tier != self.state_tier:
+                self.state_tier = target_tier
+                self.last_state_change_time = time.time()
+                self.record_state_change(self.state_tier) 
+
+            # --- APPLY LIMITS ---
             final_tier = self.state_tier
             t_str = "Standard"; t_col = COLOR_STD
             c_req, m_req = self.entry_std_core.get(), self.entry_std_mem.get()
@@ -554,15 +712,21 @@ class GpuSaverApp:
                 if final_tier == 3: self.reset_limits()
                 else: self.set_limits_force(c_req, m_req)
                 self.update_tray_color(t_col)
-            elif final_tier != 3 and loop_cnt % 10 == 0: self.enforce_limits_smart(c_req, m_req)
+            elif final_tier != 3: 
+                 if (time.time() - self.last_enforce_time) > 5.0:
+                     self.enforce_limits_smart(c_req, m_req)
+                     self.last_enforce_time = time.time()
 
             T = self.translations[self.lang_var.get()]
-            self.root.after(0, lambda t=t_str, col=t_col, clk=c, mem=m, pst=p, gpu=ug, vid=uv: 
-                self.status_label.config(text=f"{T['status_mode']} {t} [{pst}] | {clk}/{mem} MHz | GPU: {ug}% VID: {uv:.0f}%", fg=col))
+            
+            try:
+                if self.root.state() == 'normal':
+                    final_txt = f"{T['status_mode']} {t_str} [{p}] | {c}/{m} MHz | GPU: {ug}% VID: {uv:.0f}%"
+                    self.root.after(0, self.update_status_text, final_txt, t_col)
+            except: pass
 
             try:
-                wait_ms = int(self.entry_sampling_rate.get())
-                if wait_ms < 100: wait_ms = 100
+                wait_ms = self.cache_rate_general
             except: wait_ms = 500
             time.sleep(wait_ms / 1000.0)
 
@@ -580,10 +744,21 @@ class GpuSaverApp:
                 messagebox.showerror("Error", T["err_lim3_empty"])
                 return
 
+            self.update_runtime_cache() 
             self.is_running = True; self.stop_event.clear(); self.btn_start.config(text=T["btn_stop"])
+            
+            # BUGFIX: Status und Zeitstempel beim Start zurücksetzen!
+            self.state_tier = 0
+            self.last_state_change_time = time.time()
+            
             self.monitor_thread = threading.Thread(target=self.loop, daemon=True); self.monitor_thread.start()
         else:
             self.is_running = False; self.stop_event.set(); self.btn_start.config(text=T["btn_start"])
+            
+            # BUGFIX: Status beim Stoppen auch sauber zurücksetzen
+            self.state_tier = 0
+            self.last_state_change_time = time.time()
+            
             self.status_label.config(text=T["status_off"], fg=COLOR_INACTIVE); self.reset_limits(); self.current_mode_name = "Unknown"; self.update_tray_color(COLOR_INACTIVE); self.load_history.clear()
             self.state_change_history.clear() 
 
@@ -627,17 +802,7 @@ class GpuSaverApp:
         self.reset_limits()
         try: pynvml.nvmlShutdown()
         except: pass
-    def get_avg_load(self, load_type, ms_duration):
-        if not self.load_history: return 0
-        now = time.time()
-        total = 0; count = 0
-        idx = 1 if load_type == 'gpu' else 2
-        for entry in reversed(self.load_history):
-            t_stamp, l_gpu, l_vid = entry
-            if (now - t_stamp) * 1000 > float(ms_duration): break
-            total += (l_gpu if idx == 1 else l_vid)
-            count += 1
-        return (total / count) if count > 0 else 0
+    
     def get_val(self, key):
         try: return float(getattr(self, f"entry_{key}").get())
         except: return 0.0
@@ -683,7 +848,8 @@ class GpuSaverApp:
         fn = filedialog.askopenfilename(filetypes=[("EXE", "*.exe"), ("All", "*.*")])
         if fn: self.add_to_listbox(target_lbox, os.path.basename(fn))
     def open_process_picker(self, target_lbox):
-        picker = tk.Toplevel(self.root); picker.geometry("300x400")
+        # FIX: Fenstergröße exakt angepasst (300x600)
+        picker = tk.Toplevel(self.root); picker.geometry("300x600")
         f = ttk.Frame(picker); f.pack(fill="both", expand=True)
         sb = ttk.Scrollbar(f); sb.pack(side="right", fill="y")
         pl = tk.Listbox(f, yscrollcommand=sb.set); pl.pack(side="left", fill="both", expand=True); sb.config(command=pl.yview)
@@ -721,11 +887,11 @@ class GpuSaverApp:
             except: pass
         self.save_config()
     def load_config(self):
-        bp = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        # PFAD OPTIMIERUNG: Nutze den gespeicherten Pfad
         self.config_data = {}
-        if os.path.exists(os.path.join(bp, CONFIG_FILE)):
+        if os.path.exists(os.path.join(self.base_path, CONFIG_FILE)):
             try:
-                with open(os.path.join(bp, CONFIG_FILE), "r") as f:
+                with open(os.path.join(self.base_path, CONFIG_FILE), "r") as f:
                     self.config_data = json.load(f)
                     self.saved_std_core = self.config_data.get("std_core", "210")
                     self.saved_std_mem = self.config_data.get("std_mem", "405")
@@ -746,7 +912,7 @@ class GpuSaverApp:
                     self.check_oscillation_var.set(self.config_data.get("check_oscillation", False)) # DIAGNOSE
             except: pass
     def save_config(self):
-        bp = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        # PFAD OPTIMIERUNG: Nutze den gespeicherten Pfad
         def ge(n): 
             try: return getattr(self, n).get()
             except: return ""
@@ -766,11 +932,12 @@ class GpuSaverApp:
             "auto_limit_auto": self.auto_limit_auto_var.get(),
             "close_to_tray": self.close_to_tray_var.get(),
             "use_dynamic_load": self.use_dynamic_load_var.get(),
-            "sampling_rate": self.entry_sampling_rate.get(),
+            "sampling_rate": self.entry_rate_general.get(),
+            "rate_process": self.entry_rate_process.get(), 
             "language": self.lang_var.get(),
             "enable_lim2": self.enable_lim2_var.get(),
             "enable_lim3": self.enable_lim3_var.get(),
-            "check_oscillation": self.check_oscillation_var.get(), # DIAGNOSE
+            "check_oscillation": self.check_oscillation_var.get(),
             "unlock_act": ge("entry_unlock_act"), "unlock_act_time": ge("entry_unlock_act_time"),
             "unlock_deact": ge("entry_unlock_deact"), "unlock_deact_time": ge("entry_unlock_deact_time"),
             "lim2_act": ge("entry_lim2_act"), "lim2_act_time": ge("entry_lim2_act_time"),
@@ -778,8 +945,11 @@ class GpuSaverApp:
             "lim3_act": ge("entry_lim3_act"), "lim3_act_time": ge("entry_lim3_act_time"),
             "lim3_deact": ge("entry_lim3_deact"), "lim3_deact_time": ge("entry_lim3_deact_time"),
         }
+        
+        self.update_runtime_cache() 
+        
         try:
-            with open(os.path.join(bp, CONFIG_FILE), "w") as f: json.dump(d, f, indent=4)
+            with open(os.path.join(self.base_path, CONFIG_FILE), "w") as f: json.dump(d, f, indent=4)
         except: pass
     def get_gpu_name(self):
         try: 
