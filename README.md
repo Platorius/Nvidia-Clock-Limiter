@@ -46,15 +46,14 @@ Diese Option erlaubt es, dass die Profile anhand der GPU- bzw. VID-Auslastung (V
 5. Profil 2 (gelb)
 6. Profil 1 (grün – Standard)
 
-**So funktioniert das Heruntertakten:**  
+**So funktioniert das Hoch- und Runtertakten:**  
 Sinkt die Last, fällt man **niemals direkt** in das Standard-Profil (grün), sondern immer stufenweise:  
 Unlock → Profil 3 → Profil 2 → Profil 1.
+Steigt die GPU-Last über den Schwellenwert unter dem Unlock-Profil, wird es immer zuerst ins Unlockprofil wechseln (die anderen "aktivieren"-Schwellenwerte reagieren nicht auf GPU-Last). D.h wenn man im Profil 2. landen will, ist der Weg immer Unlock-> Profil 3 -> Profil 2.
 
 **Schwellwerte konfigurieren:**
 - **Aktivieren**: Wann das Profil aktiviert wird (Schwelle überschritten).
 - **Deaktivieren**: Wann das Profil deaktiviert wird und automatisch ins nächstkleinere Profil gewechselt wird.
-
-**Tipp:** Wählt man bei allen Listen denselben Aktivierungswert (bzw. bei Unlock den niedrigsten), geht es bei Last zuerst ins Unlock-Profil und taktet dann stufenweise zurück (3 → 2 → 1), sobald die Auslastung unter die Schwelle sinkt.
 
 #### Detaillierte Einstellungen pro Liste
 1. **Roter Titel (Unlock-Liste)**  
@@ -63,7 +62,7 @@ Unlock → Profil 3 → Profil 2 → Profil 1.
    VID-Auslastung ist hier immer irrelevant.
 
 2. **Orange Liste (Profil 3)**  
-   Aktiviert, wenn **entweder** GPU- **oder** VID-Auslastung die Schwelle überschreitet.  
+   Aktiviert, wenn VID-Auslastung die Schwelle überschreitet (und GPU-Auslastung nicht den Schwellenwert vom Unlock-Profil überschreitet).  
    Deaktiviert erst, wenn **beide** unter die Schwelle sinken.
 
 3. **Gelbe Liste (Profil 2)**  
@@ -131,15 +130,14 @@ This option allows profiles to be switched automatically based on GPU utilisatio
 5. Profile 2 (yellow)
 6. Profile 1 (green – default)
 
-#### How Downclocking Works
+#### How Downclocking and Clock-Increasing works
 When load decreases, the tool **never jumps directly** to the default profile (green). Instead, it steps down gradually:  
 Unlock → Profile 3 → Profile 2 → Profile 1.
+When Load increases, the tool always jumps to the unlock-profile (if the load is above the activate-threshold from under the unlock-profile). That's to make sure it has not to go through all other profiles, before you get unlock-perfomance. That means, if you have GPU-Load, you only can go to the 3. limit and 2. limit through decreasing (Unlock-> Profile 3 -> Profile 2 -> Profile 1). THe other way it can only go, when only VID-Usage is above the Limits under the 3. and 2. Profile.
 
 #### Threshold Configuration
 - **Activate**: Defines when the profile becomes active (threshold exceeded).
 - **Deactivate**: Defines when the profile is deactivated and the tool switches to the next lower profile.
-
-**Tip:** Set the same activation threshold for all profiles (or the lowest for Unlock) to achieve smooth stepping: full unlock under load, then gradual downclocking as utilisation drops.
 
 #### Detailed Settings per List
 
@@ -149,7 +147,7 @@ Unlock → Profile 3 → Profile 2 → Profile 1.
    VID utilisation is always ignored here.
 
 2. **Orange list (Profile 3)**  
-   The profile activates when **either** GPU **or** VID utilisation exceeds the threshold.  
+   The profile activates when VID utilisation exceeds the threshold (but GPU-utilisation does not exceed the threshold of the Unlock-profil-value).  
    It deactivates only when **both** fall below the threshold.
 
 3. **Yellow list (Profile 2)**  
