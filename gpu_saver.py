@@ -24,35 +24,74 @@ except ImportError:
 
 CONFIG_FILE = "config.json"
 APP_NAME = "Nvidia Clock Limiter"
-VERSION = "1.3.6" # Bugfix: State Reset on Stop/Start & Code Cleanup
+VERSION = "1.6.9" # Fix: Listbox Background Color (White when active)
 
+# Farben
 COLOR_INACTIVE = "#007acc"
 COLOR_STD      = "#76b900"
 COLOR_LIM2     = "#FFC400"
 COLOR_LIM3     = "#FF6600"
 COLOR_UNLOCK   = "#FF0000"
 COLOR_DISABLED = "#555555"
-BG_DISABLED    = "#f0f0f0"
-BG_NORMAL      = "#ffffff"
+
+# Grid Farben
+GRID_COLOR        = "#e0e0e0" 
+GRID_COLOR_ACCENT = "#888888" 
+HOVER_COLOR       = "#007acc"
+
+# Layout Konfiguration
+GRAPH_HEIGHT = 90
 
 class GpuSaverApp:
     def __init__(self, root):
         self.root = root
-        self.root.geometry("1250x950")
-        self.root.resizable(False, False)
         
-        # CLEANUP: Pfad nur einmal berechnen
         if getattr(sys, 'frozen', False):
             self.base_path = os.path.dirname(sys.executable)
         else:
             self.base_path = os.path.dirname(os.path.abspath(__file__))
+
+        self.config_data = {}
+        
+        # Graph Variablen initialisieren (Defaults)
+        self.graph_vars = {
+            "gpu": tk.BooleanVar(value=True),
+            "vid": tk.BooleanVar(value=True),
+            "memc": tk.BooleanVar(value=False),
+            "cclk": tk.BooleanVar(value=False),
+            "mclk": tk.BooleanVar(value=False),
+            "prof": tk.BooleanVar(value=False)
+        }
+        
+        self.load_config_initial()
+
+        # Fenstergröße wiederherstellen
+        start_geo = self.config_data.get("window_geometry", "1250x1200")
+        if not start_geo or "x" not in start_geo: start_geo = "1250x1200"
+        
+        self.root.geometry(start_geo)
+        
+        # Min Size
+        self.root.minsize(1000, 850)
+        self.root.resizable(False, True) 
+        
+        self.last_large_geometry = start_geo
         
         self.is_running = False
         self.current_mode_name = "Unknown" 
+        self.current_mode_color = COLOR_INACTIVE 
         self.monitor_thread = None
         self.stop_event = threading.Event()
         self.last_state_change_time = time.time()
         self.last_enforce_time = 0
+
+        self.show_graph_var = tk.BooleanVar(value=False)
+        self.pause_graph_var = tk.BooleanVar(value=False)
+        
+        self.graph_widgets = {} 
+        self.mouse_on_graph = False
+        self.mouse_x_pos = 0
+        self.frozen_time_ref = 0 
 
         # Diagnose
         self.check_oscillation_var = tk.BooleanVar(value=False)
@@ -102,7 +141,7 @@ class GpuSaverApp:
         self.cache_rate_general = 500
         self.cache_rate_process = 3000
 
-        self.load_history = deque()
+        self.load_history = deque() 
         self.state_tier = 0 
 
         self.translations = {
@@ -136,7 +175,7 @@ class GpuSaverApp:
                 "btn_rem": "Entfernen",
                 "btn_start": "Takt begrenzen",
                 "btn_stop": "Begrenzung aufheben",
-                "status_off": "Status: Inaktiv",
+                "status_off": "Status: Inactive",
                 "status_mode": "MODUS:",
                 "lang_label": "Sprache / Language:",
                 "err_std_empty": "Fehler: Das '1. Standard-Limit' darf nicht leer sein!",
@@ -189,7 +228,7 @@ class GpuSaverApp:
         }
 
         self.tray_icon = None
-        self.load_config()
+        self.load_config() 
         self.update_title()
         self.check_autostart_registry()
         atexit.register(self.cleanup)
@@ -206,23 +245,33 @@ class GpuSaverApp:
         self.setup_gui()
         self.update_ui_states() 
 
-        # CLEANUP: first_load entfernt, Autostart-Logik optimiert
         if "--autostart" in sys.argv:
             if "--minimized" in sys.argv: self.root.after(0, self.minimize_to_tray)
             if self.auto_limit_auto_var.get(): self.root.after(500, self.toggle_monitoring)
         elif self.auto_limit_manual_var.get():
             self.root.after(500, self.toggle_monitoring)
 
+    def load_config_initial(self):
+        if os.path.exists(os.path.join(self.base_path, CONFIG_FILE)):
+            try:
+                with open(os.path.join(self.base_path, CONFIG_FILE), "r") as f:
+                    self.config_data = json.load(f)
+            except: pass
+
     def update_title(self):
         T = self.translations[self.lang_var.get()]
         self.root.title(T["title"])
 
     def change_language(self, event=None):
+        current_geo = self.root.geometry()
+        
         self.save_config() 
         self.load_config()
         self.update_title()
         self.setup_gui()
         self.update_ui_states() 
+        
+        self.root.geometry(current_geo)
 
     def on_oscillation_toggle(self):
         self.save_config()
@@ -241,7 +290,8 @@ class GpuSaverApp:
             en2 = True
 
         st2 = "normal" if en2 else "disabled"
-        bg2 = BG_NORMAL if en2 else BG_DISABLED
+        # FIX: Wenn aktiv = "white", wenn inaktiv = Standard-Grau
+        bg2 = "white" if en2 else "#f0f0f0"
         style2 = "Yellow.TLabelframe" if en2 else "Gray.TLabelframe"
         
         self.entry_lim2_core.config(state=st2)
@@ -259,7 +309,8 @@ class GpuSaverApp:
         for btn in self.btns_lim2: btn.config(state=st2)
         
         st3 = "normal" if en3 else "disabled"
-        bg3 = BG_NORMAL if en3 else BG_DISABLED
+        # FIX: Wenn aktiv = "white", wenn inaktiv = Standard-Grau
+        bg3 = "white" if en3 else "#f0f0f0"
         style3 = "Orange.TLabelframe" if en3 else "Gray.TLabelframe"
         
         self.entry_lim3_core.config(state=st3)
@@ -291,7 +342,6 @@ class GpuSaverApp:
         for entry in [self.entry_rate_general, self.entry_rate_process]:
             try:
                 if not entry.winfo_exists(): continue 
-                
                 val = int(entry.get())
                 if val < 100:
                     entry.delete(0, tk.END)
@@ -306,6 +356,7 @@ class GpuSaverApp:
     def setup_gui(self):
         for widget in self.root.winfo_children(): widget.destroy()
         T = self.translations[self.lang_var.get()]
+        default_bg = self.root.cget("bg")
 
         header_frame = tk.Frame(self.root, bg="#2d2d2d", height=50)
         header_frame.pack(fill="x")
@@ -335,7 +386,6 @@ class GpuSaverApp:
         ttk.Button(opts_frame_bottom, text=T["info_btn"], command=self.show_hardware_info).pack(side="right", padx=5, pady=5)
 
         r4 = ttk.Frame(opts_frame_bottom); r4.pack(fill="x", padx=5, pady=(5,5))
-        
         ttk.Label(r4, text=T["rate_gen"]).pack(side="left", padx=(0, 5))
         self.entry_rate_general = ttk.Entry(r4, width=6)
         self.entry_rate_general.insert(0, self.config_data.get("rate_general", "500"))
@@ -375,7 +425,7 @@ class GpuSaverApp:
 
         # LISTEN
         lists_container = ttk.Frame(self.root)
-        lists_container.pack(padx=10, pady=5, fill="both", expand=True)
+        lists_container.pack(padx=10, pady=5, fill="x", expand=False) 
 
         f1 = ttk.Frame(lists_container); f1.pack(side="left", fill="both", expand=True, padx=(0,5))
         self.build_list_ui(f1, T["unlock_list"], self.list_unlock, "unlock")
@@ -389,8 +439,28 @@ class GpuSaverApp:
         self.build_list_ui(f3, T["lim3_list"], self.list_lim3, "lim3")
         self.build_load_ui(f3, "lim3", "VID")
 
+        # GRAPH & CONTROLS
+        self.graph_frame = ttk.Frame(self.root)
+        self.graph_frame.pack(padx=10, pady=5, fill="x")
+        
         ctrl_frame = ttk.Frame(self.root)
-        ctrl_frame.pack(padx=15, pady=15, fill="x")
+        ctrl_frame.pack(padx=15, pady=5, fill="x")
+        
+        self.graphs_container = tk.Frame(self.root, bg=default_bg) 
+        self.graphs_container.pack(padx=10, pady=(0,10), fill="both", expand=True)
+
+        self.chk_graph = ttk.Checkbutton(self.graph_frame, text="Live-Graph (Performance-Monitor)", variable=self.show_graph_var, command=self.toggle_graph_visibility)
+        self.chk_graph.pack(anchor="w", side="left")
+        
+        self.opts_frame = ttk.Frame(self.graph_frame)
+        self.opts_frame.pack(side="left", padx=10)
+        
+        for key, text in [("gpu", "GPU"), ("vid", "VID"), ("memc", "MEMC (FB)"), ("cclk", "GPU-Takt"), ("mclk", "VRAM-Takt"), ("prof", "Profil")]:
+            ttk.Checkbutton(self.opts_frame, text=text, variable=self.graph_vars[key], command=self.refresh_graph_layout).pack(side="left", padx=5)
+
+        self.chk_pause = ttk.Checkbutton(self.graph_frame, text="Graph pausieren", variable=self.pause_graph_var, command=self.on_pause_toggle)
+        self.chk_pause.pack(anchor="w", side="left", padx=15)
+
         self.status_label = tk.Label(ctrl_frame, text=T["status_off"], fg=COLOR_INACTIVE, font=("Segoe UI", 10, "bold"))
         self.status_label.pack(side="top", pady=(0, 5))
         
@@ -398,14 +468,264 @@ class GpuSaverApp:
         self.btn_start = ttk.Button(ctrl_frame, text=btn_txt, command=self.toggle_monitoring)
         self.btn_start.pack(fill="x", ipady=8)
 
+        self.toggle_graph_visibility()
+
         self.root.protocol("WM_DELETE_WINDOW", self.on_window_close_attempt)
+
+    def on_pause_toggle(self):
+        if self.pause_graph_var.get():
+            self.frozen_time_ref = time.time()
+        else:
+            pass
+        self.draw_graphs()
+
+    def toggle_graph_visibility(self):
+        if self.show_graph_var.get():
+            self.opts_frame.pack(side="left", padx=10) 
+            self.graphs_container.pack(padx=10, pady=(0,10), fill="both", expand=True)
+            self.refresh_graph_layout()
+            
+            self.root.update_idletasks() 
+            
+            # Automatische Vergrößerung erzwingen
+            current_h = self.root.winfo_height()
+            current_w = self.root.winfo_width()
+            
+            # Min-Größe: Basis (~850) + Platz für mind. 2 Graphen (2 * 90 = 180) => ca 1050
+            MIN_GRAPH_HEIGHT_THRESHOLD = 1050
+            
+            if self.last_large_geometry and "x" in self.last_large_geometry:
+                try:
+                    parts = self.last_large_geometry.split('+')[0].split('x')
+                    old_h = int(parts[1])
+                    
+                    # Nimm die größere Höhe: Entweder gespeicherte oder Mindestgröße
+                    new_h = max(old_h, MIN_GRAPH_HEIGHT_THRESHOLD)
+                    
+                    self.root.geometry(f"{current_w}x{new_h}")
+                except: 
+                     if current_h < MIN_GRAPH_HEIGHT_THRESHOLD:
+                        self.root.geometry(f"{current_w}x{MIN_GRAPH_HEIGHT_THRESHOLD}")
+            else:
+                # Falls keine Historie, aber Fenster zu klein
+                if current_h < MIN_GRAPH_HEIGHT_THRESHOLD:
+                    self.root.geometry(f"{current_w}x{MIN_GRAPH_HEIGHT_THRESHOLD}")
+                else:
+                    self.root.geometry("") 
+        else:
+            if self.graphs_container.winfo_ismapped():
+                self.last_large_geometry = self.root.geometry()
+
+            self.opts_frame.pack_forget()
+            self.graphs_container.pack_forget()
+            
+            self.root.update_idletasks()
+            self.root.geometry("") 
+
+    def refresh_graph_layout(self):
+        for w in self.graphs_container.winfo_children(): w.destroy()
+        self.graph_widgets = {}
+        
+        if not self.show_graph_var.get(): return
+
+        active_keys = [k for k, v in self.graph_vars.items() if v.get()]
+        default_bg = self.root.cget("bg")
+        
+        for key in active_keys:
+            row_f = tk.Frame(self.graphs_container, bg=default_bg, height=GRAPH_HEIGHT) 
+            row_f.pack(fill="both", expand=True, pady=6) 
+            
+            lbl = tk.Label(row_f, text="---", bg=default_bg, width=18, anchor="w", font=("Consolas", 9, "bold"))
+            lbl.pack(side="right", padx=5)
+
+            canv = tk.Canvas(row_f, bg=default_bg, height=GRAPH_HEIGHT, highlightthickness=0)
+            canv.pack(side="left", fill="both", expand=True)
+            
+            canv.bind("<Motion>", lambda e: self.on_graph_hover(e))
+            canv.bind("<Leave>", lambda e: self.on_graph_leave(e))
+            
+            self.graph_widgets[key] = (canv, lbl)
+
+    def on_graph_hover(self, event):
+        self.mouse_on_graph = True
+        self.mouse_x_pos = event.x
+        self.draw_overlays_sync()
+
+    def on_graph_leave(self, event):
+        self.mouse_on_graph = False
+        for key, (canv, lbl) in self.graph_widgets.items():
+            canv.delete("overlay")
+
+    def draw_overlays_sync(self):
+        if not self.load_history or not self.graph_widgets or not self.mouse_on_graph: return
+        try:
+            widget = list(self.graph_widgets.values())[0][0]
+            c_width = widget.winfo_width()
+            c_height = widget.winfo_height()
+        except: return
+
+        if c_width < 10: return
+        
+        if self.pause_graph_var.get():
+            reference_time = self.frozen_time_ref
+        else:
+            reference_time = time.time()
+
+        hover_age = (c_width - self.mouse_x_pos) / c_width * 30.0
+        
+        best_entry = None
+        min_diff = 99999
+        
+        for entry in self.load_history:
+            age = reference_time - entry[0]
+            diff = abs(age - hover_age)
+            if diff < min_diff:
+                min_diff = diff
+                best_entry = entry
+        
+        if best_entry:
+            self.render_overlay_on_all(self.mouse_x_pos, best_entry, c_height)
+
+    def render_overlay_on_all(self, x, entry, height):
+        idx_map = {"gpu": 1, "vid": 2, "memc": 3, "cclk": 4, "mclk": 5, "prof": 6}
+        limits = {"gpu": 100, "vid": 100, "memc": 100, "cclk": 3000, "mclk": 12000, "prof": 3}
+        
+        for key, (canv, lbl) in self.graph_widgets.items():
+            canv.delete("overlay")
+            h = height
+            
+            canv.create_line(x, 0, x, h, fill=HOVER_COLOR, dash=(4,2), tag="overlay")
+            
+            try: val = entry[idx_map[key]]
+            except: val = 0
+
+            txt_x = x + 5
+            anchor = "w"
+            if x > canv.winfo_width() - 50:
+                txt_x = x - 5
+                anchor = "e"
+            
+            unit = "%" if key in ["gpu", "vid", "memc"] else (" MHz" if key in ["cclk", "mclk"] else "")
+            
+            disp_val = str(val)
+            if key == "prof":
+                if val == 3: disp_val = "UNL"
+                elif val == 2: disp_val = "LIM3"
+                elif val == 1: disp_val = "LIM2"
+                elif val == 0: disp_val = "STD"
+
+            canv.create_text(txt_x, 10, text=f"{disp_val}{unit}", fill=HOVER_COLOR, font=("Consolas", 8, "bold"), anchor=anchor, tag="overlay")
+            
+            limit = limits[key] if limits[key] > 0 else 1
+            y = h - (val / limit * h)
+            canv.create_oval(x-2, y-2, x+2, y+2, fill=HOVER_COLOR, outline=HOVER_COLOR, tag="overlay")
+
+    def draw_graphs(self):
+        if self.root.state() == 'withdrawn': return
+        if not self.show_graph_var.get() or not self.load_history: return
+        
+        display_duration = 30.0 
+        
+        if self.pause_graph_var.get():
+            now = self.frozen_time_ref
+        else:
+            now = time.time()
+        
+        limits = {"gpu": 100, "vid": 100, "memc": 100, "cclk": 3000, "mclk": 12000, "prof": 3}
+        idx_map = {"gpu": 1, "vid": 2, "memc": 3, "cclk": 4, "mclk": 5, "prof": 6}
+        
+        last_vals = {}
+        points = {k: [] for k in self.graph_widgets.keys()}
+        
+        c_width = 0
+        c_height = GRAPH_HEIGHT
+        if self.graph_widgets:
+            try: 
+                widget = list(self.graph_widgets.values())[0][0]
+                c_width = widget.winfo_width()
+                c_height = widget.winfo_height()
+                if c_height < 10: c_height = GRAPH_HEIGHT
+            except: pass
+        
+        if c_width < 10: return
+
+        for entry in self.load_history:
+            t = entry[0]
+            age = now - t
+            if age > display_duration: continue
+            if age < 0: continue 
+            
+            x = c_width - (age / display_duration * c_width)
+            
+            for key in self.graph_widgets.keys():
+                try: val = entry[idx_map[key]]
+                except: val = 0
+                
+                last_vals[key] = val
+                
+                h = c_height
+                limit = limits[key] if limits[key] > 0 else 1
+                y = h - (val / limit * h)
+                points[key].extend([x, y])
+        
+        try:
+            sr = self.cache_rate_general
+            if sr < 100: sr = 100 
+        except: sr = 500
+        
+        px_per_sec = c_width / display_duration
+        px_step = (sr / 1000.0) * px_per_sec
+        if px_step < 5: px_step = 5 
+
+        for key, (canv, lbl) in self.graph_widgets.items():
+            canv.delete("grid")
+            canv.delete("graph")
+            
+            h = c_height 
+            
+            for i in range(11): 
+                line_y = h - (i * 0.1 * h)
+                if i == 0: line_y = 1
+                if i == 10: line_y = h - 1
+
+                if i in [0, 5, 10]:
+                    canv.create_line(0, line_y, c_width, line_y, fill=GRID_COLOR_ACCENT, width=1, tag="grid")
+                else:
+                    canv.create_line(0, line_y, c_width, line_y, fill=GRID_COLOR, width=1, tag="grid")
+            
+            curr_x = c_width
+            while curr_x > 0:
+                canv.create_line(curr_x, 0, curr_x, h, fill=GRID_COLOR, width=1, tag="grid")
+                curr_x -= px_step
+
+            if len(points[key]) > 2:
+                w = 3 if key == "prof" else 2
+                canv.create_line(points[key], fill=self.current_mode_color, width=w, tag="graph")
+            
+            val = last_vals.get(key, 0)
+            unit = "%" if key in ["gpu", "vid", "memc"] else (" MHz" if key in ["cclk", "mclk"] else "")
+            
+            disp_val = str(val)
+            if key == "prof":
+                if val == 3: disp_val = "UNL (3)"
+                elif val == 2: disp_val = "LIM3 (2)"
+                elif val == 1: disp_val = "LIM2 (1)"
+                elif val == 0: disp_val = "STD (0)"
+            
+            # Anzeige im Graphen selbst
+            disp_key = key.upper()
+            if key == "memc": disp_key = "MEMC (FB)"
+            
+            lbl.config(text=f"{disp_key}: {disp_val}{unit}", fg=self.current_mode_color)
+
+        if self.mouse_on_graph:
+            self.draw_overlays_sync()
 
     def create_entry_pair(self, parent, key, def_c, def_m, start_row=0):
         e_c = ttk.Entry(parent, width=8)
         e_c.insert(0, def_c) 
         e_m = ttk.Entry(parent, width=8)
         e_m.insert(0, def_m)
-        
         ttk.Label(parent, text="Core:").grid(row=start_row, column=0, padx=5, pady=5)
         e_c.grid(row=start_row, column=1, padx=5, pady=5)
         ttk.Label(parent, text="VRAM:").grid(row=start_row+1, column=0, padx=5, pady=5)
@@ -417,23 +737,20 @@ class GpuSaverApp:
         T = self.translations[self.lang_var.get()]
         style_name = "Bold.TLabelframe"
         if ltype == "unlock": style_name = "Red.TLabelframe"
-
         c = ttk.LabelFrame(parent, text=title, style=style_name)
         c.pack(fill="both", expand=True)
-        
         if ltype == "lim2": self.frame_list_lim2 = c
         elif ltype == "lim3": self.frame_list_lim3 = c
-
         lf = ttk.Frame(c); lf.pack(fill="both", expand=True, padx=5, pady=5)
         sc = ttk.Scrollbar(lf); sc.pack(side="right", fill="y")
-        lb = tk.Listbox(lf, height=6, yscrollcommand=sc.set, font=("Consolas", 9))
+        
+        lb = tk.Listbox(lf, height=15, yscrollcommand=sc.set, font=("Consolas", 9))
+        
         lb.pack(side="left", fill="both", expand=True); sc.config(command=lb.yview)
         for x in source: lb.insert(tk.END, x)
-        
         if ltype=="unlock": self.lbox_unlock = lb
         elif ltype=="lim2": self.lbox_lim2 = lb
         elif ltype=="lim3": self.lbox_lim3 = lb
-        
         tf = ttk.Frame(c); tf.pack(fill="x", padx=5, pady=5)
         b1 = ttk.Button(tf, text=T["btn_browse"], command=lambda: self.browse_file(lb))
         b1.pack(side="left", fill="x", expand=True)
@@ -441,7 +758,6 @@ class GpuSaverApp:
         b2.pack(side="left", fill="x", expand=True)
         b3 = ttk.Button(c, text=T["btn_rem"], command=lambda: self.remove_entry(lb))
         b3.pack(fill="x", padx=5, pady=(0,5))
-
         if ltype == "lim2": self.btns_lim2 = [b1, b2, b3]
         elif ltype == "lim3": self.btns_lim3 = [b1, b2, b3]
 
@@ -459,19 +775,15 @@ class GpuSaverApp:
         e_d = ttk.Entry(r2, width=5); e_d.pack(side="left")
         ttk.Label(r2, text=T["time"]).pack(side="left")
         e_dt = ttk.Entry(r2, width=6); e_dt.pack(side="left")
-        
         setattr(self, f"entry_{key}_act", e_a); setattr(self, f"entry_{key}_act_time", e_at)
         setattr(self, f"entry_{key}_deact", e_d); setattr(self, f"entry_{key}_deact_time", e_dt)
-        
         def sv(e, v): 
             e.delete(0, tk.END); e.insert(0, str(v))
-        
         sv(e_a, self.config_data.get(f"{key}_act", "90"))
         sv(e_at, self.config_data.get(f"{key}_act_time", "1000"))
         sv(e_d, self.config_data.get(f"{key}_deact", "30"))
         sv(e_dt, self.config_data.get(f"{key}_deact_time", "3000"))
 
-    # --- HELFER FUNKTION ---
     def record_state_change(self, new_tier):
         if self.cache_check_oscillation:
             now_t = time.time()
@@ -485,12 +797,10 @@ class GpuSaverApp:
             self.cache_apps_lim2 = set([x.lower() for x in self.lbox_lim2.get(0, tk.END)])
             self.cache_apps_lim3 = set([x.lower() for x in self.lbox_lim3.get(0, tk.END)])
         except: pass
-        
         self.cache_enable_lim2 = self.enable_lim2_var.get()
         self.cache_enable_lim3 = self.enable_lim3_var.get()
         self.cache_use_dynamic = self.use_dynamic_load_var.get()
         self.cache_check_oscillation = self.check_oscillation_var.get()
-
         def gv(k): return self.get_val(k)
         self.cache_settings_load = {
             "unlock_act": gv("unlock_act"), "unlock_act_time": gv("unlock_act_time"),
@@ -500,25 +810,20 @@ class GpuSaverApp:
             "lim3_deact": gv("lim3_deact"), "lim3_deact_time": gv("lim3_deact_time"),
             "lim2_deact": gv("lim2_deact"), "lim2_deact_time": gv("lim2_deact_time"),
         }
-        
         try: self.cache_rate_general = int(self.entry_rate_general.get())
         except: self.cache_rate_general = 500
         try: self.cache_rate_process = int(self.entry_rate_process.get())
         except: self.cache_rate_process = 3000
 
-    # --- DIAGNOSE FUNKTION ---
     def check_for_oscillation(self):
         if len(self.state_change_history) < 9: return
-
         history = list(self.state_change_history)
         fast_switches = 0
         s = self.cache_settings_load
-        
         for i in range(1, len(history)):
             tier_now, time_now = history[i]
             tier_prev, time_prev = history[i-1]
             time_diff = (time_now - time_prev) * 1000 
-            
             limit_ref = 0
             if tier_now < tier_prev:
                 if tier_prev == 3: limit_ref = s["unlock_deact_time"]
@@ -528,14 +833,10 @@ class GpuSaverApp:
                 if tier_now == 3: limit_ref = s["unlock_act_time"]
                 elif tier_now == 2: limit_ref = s["lim3_act_time"]
                 elif tier_now == 1: limit_ref = s["lim2_act_time"]
-
             threshold = limit_ref + 3000 
-            
             if limit_ref > 0 and time_diff < threshold:
                 fast_switches += 1
-
-        if fast_switches >= 8:
-            self.trigger_warning()
+        if fast_switches >= 8: self.trigger_warning()
 
     def _show_warning_modal(self):
         T = self.translations[self.lang_var.get()]
@@ -545,22 +846,18 @@ class GpuSaverApp:
     def trigger_warning(self):
         if self.warning_popup_open: return
         if time.time() < self.last_warning_time + 60: return
-
         self.last_warning_time = time.time()
         self.warning_popup_open = True 
         self.state_change_history.clear()
-        
         self.root.after(0, self._show_warning_modal)
 
-    # --- CORE LOOP HELPERS ---
     def get_avg_load(self, load_type, ms_duration):
-        # NUR DURCHSCHNITT (AVERAGE)
         if not self.load_history: return 0
         now = time.time()
         total = 0; count = 0
         idx = 1 if load_type == 'gpu' else 2
         for entry in reversed(self.load_history):
-            t_stamp, l_gpu, l_vid = entry
+            t_stamp, l_gpu, l_vid = entry[0], entry[1], entry[2]
             if (now - t_stamp) * 1000 > float(ms_duration): break
             total += (l_gpu if idx == 1 else l_vid)
             count += 1
@@ -568,19 +865,24 @@ class GpuSaverApp:
 
     def update_status_text(self, text, color):
         self.status_label.config(text=text, fg=color)
+        self.current_mode_color = color # Für Graph
 
     def loop(self):
         current_list_tier = 0 
         next_process_scan_time = 0
         s = self.cache_settings_load 
+        
+        # Sicherstellen, dass History beim Start leer ist
+        self.load_history.clear()
 
         while not self.stop_event.is_set():
             start_t = time.time()
-            c, m, p, ug, uv = self.get_gpu_status()
-            self.load_history.append((start_t, ug, uv))
-            while self.load_history and (start_t - self.load_history[0][0]) > 10: self.load_history.popleft()
+            c, m, p, ug, uv, um = self.get_gpu_status()
+            
+            self.load_history.append((start_t, ug, uv, um, c, m, self.state_tier))
+            # Buffer auf 600s
+            while self.load_history and (start_t - self.load_history[0][0]) > 600: self.load_history.popleft()
 
-            # 1. PROCESS SCANNER (Slow)
             if start_t > next_process_scan_time:
                 next_process_scan_time = start_t + (self.cache_rate_process / 1000.0) 
                 current_list_tier = 0
@@ -597,104 +899,67 @@ class GpuSaverApp:
                         except: pass
                 except: pass
 
-            # 2. STATE MACHINE (FSM Logic)
             target_tier = self.state_tier
             L_Tier = current_list_tier
             use_dyn = self.cache_use_dynamic
             
-            # Helper zur Prüfung der "Guard Time" (Wartezeit nach Wechsel)
             time_in_state_ms = (time.time() - self.last_state_change_time) * 1000
             
-            # --- SZENARIO A: Wir sind im Standard (0) ---
             if self.state_tier == 0:
-                # HOCHSCHALTEN (Jedes Ziel hat eigene Sperrfrist)
-                
-                # Check Unlock
                 if time_in_state_ms > s["unlock_act_time"]:
                     if L_Tier == 3 or (use_dyn and self.get_avg_load("gpu", s["unlock_act_time"]) > s["unlock_act"]):
                         target_tier = 3
-                
-                # Check Lim 3 (Falls Unlock nicht getriggert)
                 if target_tier == 0 and self.cache_enable_lim3 and time_in_state_ms > s["lim3_act_time"]:
                     if L_Tier == 2 or (use_dyn and self.get_avg_load("vid", s["lim3_act_time"]) > s["lim3_act"]):
                         target_tier = 2
-                
-                # Check Lim 2 (Falls Unlock/Lim3 nicht getriggert)
                 if target_tier == 0 and self.cache_enable_lim2 and time_in_state_ms > s["lim2_act_time"]:
                     if L_Tier == 1 or (use_dyn and self.get_avg_load("vid", s["lim2_act_time"]) > s["lim2_act"]):
                         target_tier = 1
             
-            # --- SZENARIO B: Wir sind im Unlock (3) ---
             elif self.state_tier == 3:
-                # RUNTERSCHALTEN
                 stay = False
-                
-                # ZWINGENDE WARTEZEIT (DEACT GUARD)
-                if time_in_state_ms < s["unlock_deact_time"]:
-                    stay = True # Sperrfrist läuft -> Bleiben
+                if time_in_state_ms < s["unlock_deact_time"]: stay = True 
                 else:
-                    # Zeit abgelaufen -> Durchschnitt prüfen
                     if L_Tier == 3: stay = True
                     elif use_dyn and self.get_avg_load("gpu", s["unlock_deact_time"]) >= s["unlock_deact"]: stay = True
-                
                 if not stay: target_tier = 2
 
-            # --- SZENARIO C: Wir sind im 3. Limit (2) ---
             elif self.state_tier == 2:
-                # HOCH (zu Unlock)
                 if time_in_state_ms > s["unlock_act_time"]:
                     if L_Tier == 3 or (use_dyn and self.get_avg_load("gpu", s["unlock_act_time"]) > s["unlock_act"]):
                         target_tier = 3
-
-                # RUNTER (zu Lim 2) - Nur wenn nicht hochgeschaltet
                 if target_tier == 2:
                     stay = False
-                    # ZWINGENDE WARTEZEIT (DEACT GUARD)
-                    if time_in_state_ms < s["lim3_deact_time"]:
-                        stay = True
+                    if time_in_state_ms < s["lim3_deact_time"]: stay = True
                     else:
                         if L_Tier == 2: stay = True
                         elif use_dyn:
                             if self.get_avg_load("gpu", s["lim3_deact_time"]) >= s["lim3_deact"]: stay = True
                             elif self.get_avg_load("vid", s["lim3_deact_time"]) >= s["lim3_deact"]: stay = True
-                    
-                    if not stay or not self.cache_enable_lim3:
-                        target_tier = 1
+                    if not stay or not self.cache_enable_lim3: target_tier = 1
             
-            # --- SZENARIO D: Wir sind im 2. Limit (1) ---
             elif self.state_tier == 1:
-                # HOCH (zu Unlock)
                 if time_in_state_ms > s["unlock_act_time"]:
                     if L_Tier == 3 or (use_dyn and self.get_avg_load("gpu", s["unlock_act_time"]) > s["unlock_act"]):
                         target_tier = 3
-                
-                # HOCH (zu Lim 3)
                 if target_tier == 1 and self.cache_enable_lim3 and time_in_state_ms > s["lim3_act_time"]:
                     if L_Tier == 2 or (use_dyn and self.get_avg_load("vid", s["lim3_act_time"]) > s["lim3_act"]):
                         target_tier = 2
-
-                # RUNTER (zu Standard)
                 if target_tier == 1:
                     stay = False
-                    # ZWINGENDE WARTEZEIT (DEACT GUARD)
-                    if time_in_state_ms < s["lim2_deact_time"]:
-                        stay = True
+                    if time_in_state_ms < s["lim2_deact_time"]: stay = True
                     else:
                         if L_Tier == 1: stay = True
                         elif use_dyn:
                             if self.get_avg_load("gpu", s["lim2_deact_time"]) >= s["lim2_deact"]: stay = True
                             elif self.get_avg_load("vid", s["lim2_deact_time"]) >= s["lim2_deact"]: stay = True
-                    
-                    if not stay or not self.cache_enable_lim2:
-                        target_tier = 0
+                    if not stay or not self.cache_enable_lim2: target_tier = 0
 
-            # --- CHANGE EXECUTION ---
             if target_tier != self.state_tier:
                 self.state_tier = target_tier
                 self.last_state_change_time = time.time()
                 self.record_state_change(self.state_tier) 
 
-            # --- APPLY LIMITS ---
             final_tier = self.state_tier
             t_str = "Standard"; t_col = COLOR_STD
             c_req, m_req = self.entry_std_core.get(), self.entry_std_mem.get()
@@ -718,11 +983,11 @@ class GpuSaverApp:
                      self.last_enforce_time = time.time()
 
             T = self.translations[self.lang_var.get()]
-            
             try:
                 if self.root.state() == 'normal':
-                    final_txt = f"{T['status_mode']} {t_str} [{p}] | {c}/{m} MHz | GPU: {ug}% VID: {uv:.0f}%"
+                    final_txt = f"{T['status_mode']} {t_str} [{p}] | {c}/{m} MHz | GPU: {ug}% VID: {uv:.0f}% MEMC (FB): {um}%"
                     self.root.after(0, self.update_status_text, final_txt, t_col)
+                    self.root.after(0, self.draw_graphs)
             except: pass
 
             try:
@@ -730,7 +995,6 @@ class GpuSaverApp:
             except: wait_ms = 500
             time.sleep(wait_ms / 1000.0)
 
-    # --- REST UNVERÄNDERT ---
     def toggle_monitoring(self):
         T = self.translations[self.lang_var.get()]
         if not self.is_running:
@@ -747,7 +1011,7 @@ class GpuSaverApp:
             self.update_runtime_cache() 
             self.is_running = True; self.stop_event.clear(); self.btn_start.config(text=T["btn_stop"])
             
-            # BUGFIX: Status und Zeitstempel beim Start zurücksetzen!
+            # WICHTIG: Status Reset beim Start
             self.state_tier = 0
             self.last_state_change_time = time.time()
             
@@ -755,7 +1019,7 @@ class GpuSaverApp:
         else:
             self.is_running = False; self.stop_event.set(); self.btn_start.config(text=T["btn_start"])
             
-            # BUGFIX: Status beim Stoppen auch sauber zurücksetzen
+            # WICHTIG: Status Reset beim Stop
             self.state_tier = 0
             self.last_state_change_time = time.time()
             
@@ -774,6 +1038,7 @@ class GpuSaverApp:
             m = pynvml.nvmlDeviceGetClockInfo(self.nvml_handle, pynvml.NVML_CLOCK_MEM)
             rates = pynvml.nvmlDeviceGetUtilizationRates(self.nvml_handle)
             ug = rates.gpu
+            um = rates.memory
             try:
                 ue = pynvml.nvmlDeviceGetEncoderUtilization(self.nvml_handle)[0]
                 ud = pynvml.nvmlDeviceGetDecoderUtilization(self.nvml_handle)[0]
@@ -783,13 +1048,13 @@ class GpuSaverApp:
                 p_state = pynvml.nvmlDeviceGetPowerState(self.nvml_handle)
                 p = f"P{p_state}"
             except: p = "P?"
-            return c, m, p, ug, uv
-        except: return 0, 0, "Err", 0, 0
+            return c, m, p, ug, uv, um
+        except: return 0, 0, "Err", 0, 0, 0
     def enforce_limits_smart(self, core, mem):
         if not core or not mem: return
         try:
             tc, tm = int(core), int(mem)
-            cc, cm, _, _, _ = self.get_gpu_status()
+            cc, cm, _, _, _, _ = self.get_gpu_status()
             if cc > (tc + 50): self.run_smi(["-lgc", str(tc)]); time.sleep(0.05)
             if cm > (tm + 50): self.run_smi(["-lmc", str(tm)])
         except: pass
@@ -840,7 +1105,18 @@ class GpuSaverApp:
         if self.close_to_tray_var.get(): self.minimize_to_tray()
         else: self.on_real_close()
     def on_real_close(self):
-        self.stop_event.set(); self.cleanup(); self.save_config(); self.root.destroy(); sys.exit(0)
+        # GEOMETRIE SPEICHERN BEIM BEENDEN
+        if self.root.state() == 'normal':
+             if self.root.winfo_width() > 200:
+                self.config_data["window_geometry"] = self.root.geometry()
+        elif self.last_large_geometry:
+             self.config_data["window_geometry"] = self.last_large_geometry
+             
+        self.stop_event.set()
+        self.cleanup()
+        self.save_config()
+        self.root.destroy()
+        sys.exit(0)
     def add_to_listbox(self, lbox, item):
         if not item: return
         if item not in lbox.get(0, tk.END): lbox.insert(tk.END, item); self.save_config()
@@ -848,7 +1124,6 @@ class GpuSaverApp:
         fn = filedialog.askopenfilename(filetypes=[("EXE", "*.exe"), ("All", "*.*")])
         if fn: self.add_to_listbox(target_lbox, os.path.basename(fn))
     def open_process_picker(self, target_lbox):
-        # FIX: Fenstergröße exakt angepasst (300x600)
         picker = tk.Toplevel(self.root); picker.geometry("300x600")
         f = ttk.Frame(picker); f.pack(fill="both", expand=True)
         sb = ttk.Scrollbar(f); sb.pack(side="right", fill="y")
@@ -887,12 +1162,12 @@ class GpuSaverApp:
             except: pass
         self.save_config()
     def load_config(self):
-        # PFAD OPTIMIERUNG: Nutze den gespeicherten Pfad
-        self.config_data = {}
+        # Nur Restliche Config, Geometry war schon in init
         if os.path.exists(os.path.join(self.base_path, CONFIG_FILE)):
             try:
                 with open(os.path.join(self.base_path, CONFIG_FILE), "r") as f:
-                    self.config_data = json.load(f)
+                    data = json.load(f)
+                    self.config_data.update(data)
                     self.saved_std_core = self.config_data.get("std_core", "210")
                     self.saved_std_mem = self.config_data.get("std_mem", "405")
                     self.saved_lim2_core = self.config_data.get("lim2_core", "420")
@@ -909,10 +1184,18 @@ class GpuSaverApp:
                     self.lang_var.set(self.config_data.get("language", "Deutsch"))
                     self.enable_lim2_var.set(self.config_data.get("enable_lim2", True))
                     self.enable_lim3_var.set(self.config_data.get("enable_lim3", True))
-                    self.check_oscillation_var.set(self.config_data.get("check_oscillation", False)) # DIAGNOSE
+                    self.check_oscillation_var.set(self.config_data.get("check_oscillation", False)) 
+                    
+                    # SENSORS LOAD
+                    self.graph_vars["gpu"].set(self.config_data.get("show_graph_gpu", True))
+                    self.graph_vars["vid"].set(self.config_data.get("show_graph_vid", True))
+                    self.graph_vars["memc"].set(self.config_data.get("show_graph_memc", False))
+                    self.graph_vars["cclk"].set(self.config_data.get("show_graph_cclk", False))
+                    self.graph_vars["mclk"].set(self.config_data.get("show_graph_mclk", False))
+                    self.graph_vars["prof"].set(self.config_data.get("show_graph_prof", False))
+                    
             except: pass
     def save_config(self):
-        # PFAD OPTIMIERUNG: Nutze den gespeicherten Pfad
         def ge(n): 
             try: return getattr(self, n).get()
             except: return ""
@@ -921,7 +1204,15 @@ class GpuSaverApp:
             self.list_lim2 = self.lbox_lim2.get(0, tk.END)
             self.list_lim3 = self.lbox_lim3.get(0, tk.END)
         except: pass
+        
+        current_geo = ""
+        if self.root.state() == 'normal' and self.root.winfo_width() > 200:
+             current_geo = self.root.geometry()
+        elif self.last_large_geometry:
+             current_geo = self.last_large_geometry
+        
         d = {
+            "window_geometry": current_geo,
             "std_core": self.entry_std_core.get(), "std_mem": self.entry_std_mem.get(),
             "lim2_core": self.entry_lim2_core.get(), "lim2_mem": self.entry_lim2_mem.get(),
             "lim3_core": self.entry_lim3_core.get(), "lim3_mem": self.entry_lim3_mem.get(),
@@ -944,6 +1235,14 @@ class GpuSaverApp:
             "lim2_deact": ge("entry_lim2_deact"), "lim2_deact_time": ge("entry_lim2_deact_time"),
             "lim3_act": ge("entry_lim3_act"), "lim3_act_time": ge("entry_lim3_act_time"),
             "lim3_deact": ge("entry_lim3_deact"), "lim3_deact_time": ge("entry_lim3_deact_time"),
+            
+            # SENSORS SAVE
+            "show_graph_gpu": self.graph_vars["gpu"].get(),
+            "show_graph_vid": self.graph_vars["vid"].get(),
+            "show_graph_memc": self.graph_vars["memc"].get(),
+            "show_graph_cclk": self.graph_vars["cclk"].get(),
+            "show_graph_mclk": self.graph_vars["mclk"].get(),
+            "show_graph_prof": self.graph_vars["prof"].get(),
         }
         
         self.update_runtime_cache() 
